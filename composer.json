@@ -11,7 +11,8 @@
     },
     "require": {
         "php": "^8.1",
-        "codeigniter4/framework": "^4.0"
+        "codeigniter4/framework": "^4.0",
+        "square/square": "^45.0"
     },
     "require-dev": {
         "fakerphp/faker": "^1.9",
@@ -35,7 +36,10 @@
     "config": {
         "optimize-autoloader": true,
         "preferred-install": "dist",
-        "sort-packages": true
+        "sort-packages": true,
+        "allow-plugins": {
+            "php-http/discovery": false
+        }
     },
     "scripts": {
         "test": "phpunit"

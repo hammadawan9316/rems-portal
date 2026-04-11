@@ -19,6 +19,15 @@ use CodeIgniter\Config\BaseService;
  */
 class Services extends BaseService
 {
+    public static function emailQueue(bool $getShared = true)
+    {
+        if ($getShared) {
+            return static::getSharedInstance('emailQueue');
+        }
+
+        return new \App\Libraries\EmailQueueService();
+    }
+
     /*
      * public static function example($getShared = true)
      * {

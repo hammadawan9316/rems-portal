@@ -26,6 +26,7 @@ abstract class BaseController extends Controller
      */
 
     // protected $session;
+    protected $helpers = ['queue'];
 
     /**
      * @return void

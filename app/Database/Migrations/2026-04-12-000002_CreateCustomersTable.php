@@ -4,7 +4,10 @@ namespace App\Database\Migrations;
 
 use CodeIgniter\Database\Migration;
 
-class CreateProjectsTable extends Migration
+/**
+ * Creates customers table for the normalized customer model.
+ */
+class CreateCustomersTableAndLinkProjects extends Migration
 {
     public function up()
     {
@@ -15,54 +18,29 @@ class CreateProjectsTable extends Migration
                 'unsigned' => true,
                 'auto_increment' => true,
             ],
-            'client_name' => [
+            'name' => [
                 'type' => 'VARCHAR',
                 'constraint' => 160,
             ],
-            'client_email' => [
+            'email' => [
                 'type' => 'VARCHAR',
                 'constraint' => 190,
             ],
-            'client_phone' => [
+            'phone' => [
                 'type' => 'VARCHAR',
                 'constraint' => 40,
                 'null' => true,
             ],
-            'project_title' => [
+            'company' => [
                 'type' => 'VARCHAR',
                 'constraint' => 190,
-            ],
-            'project_description' => [
-                'type' => 'TEXT',
                 'null' => true,
-            ],
-            'file_links' => [
-                'type' => 'TEXT',
-                'null' => true,
-            ],
-            'status' => [
-                'type' => 'VARCHAR',
-                'constraint' => 40,
-                'default' => 'submitted',
             ],
             'square_customer_id' => [
                 'type' => 'VARCHAR',
                 'constraint' => 80,
                 'null' => true,
-            ],
-            'square_order_id' => [
-                'type' => 'VARCHAR',
-                'constraint' => 80,
-                'null' => true,
-            ],
-            'square_estimate_id' => [
-                'type' => 'VARCHAR',
-                'constraint' => 80,
-                'null' => true,
-            ],
-            'square_error' => [
-                'type' => 'TEXT',
-                'null' => true,
+                'after' => 'company',
             ],
             'created_at' => [
                 'type' => 'DATETIME',
@@ -75,13 +53,13 @@ class CreateProjectsTable extends Migration
         ]);
 
         $this->forge->addKey('id', true);
-        $this->forge->addKey('client_email');
-        $this->forge->addKey('status');
-        $this->forge->createTable('projects', true);
+        $this->forge->addUniqueKey('email');
+        $this->forge->addUniqueKey('square_customer_id');
+        $this->forge->createTable('customers', true);
     }
 
     public function down()
     {
-        $this->forge->dropTable('projects', true);
+        $this->forge->dropTable('customers', true);
     }
 }

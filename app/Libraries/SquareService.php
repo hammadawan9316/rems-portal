@@ -20,6 +20,11 @@ class SquareService
         return $this->config->accessToken !== '' && $this->config->locationId !== '';
     }
 
+    public function getApiVersion(): string
+    {
+        return $this->config->apiVersion;
+    }
+
     /**
      * @return array{id:string,created:bool}
      */
@@ -58,13 +63,59 @@ class SquareService
         string $customerId,
         string $projectTitle,
         string $description,
-        ?string $fileLink = null,
-        int $estimatedAmountCents = 10000
+        array $projectData = [],
+        array $fileLinks = [],
+        ?int $estimatedAmountCents = null
     ): array {
-        $note = "Project #{$projectId}: {$description}";
-        if ($fileLink !== null && $fileLink !== '') {
-            $note .= "\n\nAttachment: {$fileLink}";
+        $noteLines = ["Project #{$projectId}: {$description}"];
+
+        $details = [
+            'project_title' => $projectTitle,
+            'project_description' => $description,
+            'nature' => $projectData['nature'] ?? null,
+            'trades' => $projectData['trades'] ?? null,
+            'scope' => $projectData['scope'] ?? null,
+            'estimate_type' => $projectData['estimate_type'] ?? null,
+            'plans_url' => $projectData['plans_url'] ?? null,
+            'zip_code' => $projectData['zip_code'] ?? null,
+            'deadline' => $projectData['deadline'] ?? null,
+            'deadline_date' => $projectData['deadline_date'] ?? null,
+            'estimated_amount' => $estimatedAmountCents,
+        ];
+
+        $noteLines[] = '';
+        $noteLines[] = 'Project Details:';
+        foreach ($details as $key => $value) {
+            $formatted = $this->formatProjectField($key, $value);
+            if ($formatted !== null) {
+                $noteLines[] = '- ' . $formatted;
+            }
         }
+
+        if ($fileLinks !== []) {
+            $noteLines[] = '';
+            $noteLines[] = 'File Links:';
+            foreach ($fileLinks as $link) {
+                $candidate = trim((string) $link);
+                if ($candidate !== '') {
+                    $noteLines[] = '- ' . $candidate;
+                }
+            }
+        }
+
+        $note = implode("\n", $noteLines);
+
+        $lineAmount = $estimatedAmountCents === null ? 0 : max(0, $estimatedAmountCents);
+
+        $lineItem = [
+            'name' => $projectTitle,
+            'quantity' => '1',
+            'note' => $note,
+            'base_price_money' => [
+                'amount' => $lineAmount,
+                'currency' => $this->config->currency,
+            ],
+        ];
 
         $orderPayload = [
             'idempotency_key' => $this->idempotencyKey('order', $projectId),
@@ -73,15 +124,7 @@ class SquareService
                 'customer_id' => $customerId,
                 'reference_id' => 'project-' . $projectId,
                 'line_items' => [
-                    [
-                        'name' => $projectTitle,
-                        'quantity' => '1',
-                        'note' => $note,
-                        'base_price_money' => [
-                            'amount' => max(100, $estimatedAmountCents),
-                            'currency' => $this->config->currency,
-                        ],
-                    ],
+                    $lineItem,
                 ],
             ],
         ];
@@ -100,8 +143,16 @@ class SquareService
                 'primary_recipient' => [
                     'customer_id' => $customerId,
                 ],
+                'delivery_method' => 'EMAIL',
                 'title' => 'Estimate for ' . $projectTitle,
                 'description' => 'Draft estimate linked to project #' . $projectId,
+                'accepted_payment_methods' => [
+                    'card' => true,
+                    'square_gift_card' => false,
+                    'bank_account' => false,
+                    'buy_now_pay_later' => false,
+                    'cash_app_pay' => false,
+                ],
                 'payment_requests' => [
                     [
                         'request_type' => 'BALANCE',
@@ -150,6 +201,10 @@ class SquareService
     private function request(string $method, string $path, array $payload = []): array
     {
         if (!$this->isConfigured()) {
+            log_message('error', 'Square not configured. Missing token or location. base_url={baseUrl}, api_version={apiVersion}', [
+                'baseUrl' => rtrim($this->config->baseUrl, '/'),
+                'apiVersion' => $this->config->apiVersion,
+            ]);
             throw new \RuntimeException('Square is not configured. Set access token and location ID.');
         }
 
@@ -159,14 +214,26 @@ class SquareService
             'http_errors' => false,
         ]);
 
-        $response = $client->request($method, ltrim($path, '/'), [
-            'headers' => [
-                'Authorization' => 'Bearer ' . $this->config->accessToken,
-                'Content-Type' => 'application/json',
-                'Square-Version' => $this->config->apiVersion,
-            ],
-            'json' => $payload,
-        ]);
+        try {
+            $response = $client->request($method, ltrim($path, '/'), [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $this->config->accessToken,
+                    'Content-Type' => 'application/json',
+                    'Square-Version' => $this->config->apiVersion,
+                ],
+                'json' => $payload,
+            ]);
+        } catch (\Throwable $exception) {
+            log_message('error', 'Square request transport failure. method={method}, path={path}, base_url={baseUrl}, api_version={apiVersion}, location_id={locationId}, error={error}', [
+                'method' => strtoupper($method),
+                'path' => '/' . ltrim($path, '/'),
+                'baseUrl' => rtrim($this->config->baseUrl, '/'),
+                'apiVersion' => $this->config->apiVersion,
+                'locationId' => $this->config->locationId,
+                'error' => $exception->getMessage(),
+            ]);
+            throw $exception;
+        }
 
         $status = $response->getStatusCode();
         $raw = (string) $response->getBody();
@@ -177,6 +244,15 @@ class SquareService
 
         if ($status >= 400) {
             $error = $decoded['errors'][0]['detail'] ?? $raw;
+            log_message('error', 'Square API failure. method={method}, path={path}, status={status}, base_url={baseUrl}, api_version={apiVersion}, location_id={locationId}, response={response}', [
+                'method' => strtoupper($method),
+                'path' => '/' . ltrim($path, '/'),
+                'status' => $status,
+                'baseUrl' => rtrim($this->config->baseUrl, '/'),
+                'apiVersion' => $this->config->apiVersion,
+                'locationId' => $this->config->locationId,
+                'response' => $raw,
+            ]);
             throw new \RuntimeException('Square API error: ' . $error);
         }
 
@@ -186,5 +262,49 @@ class SquareService
     private function idempotencyKey(string $type, int $projectId): string
     {
         return $type . '-' . $projectId . '-' . bin2hex(random_bytes(8));
+    }
+
+    /**
+     * @param mixed $value
+     */
+    private function formatProjectField(string $key, $value): ?string
+    {
+        if ($value === null) {
+            return $key . ': null';
+        }
+
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            if ($trimmed === '') {
+                return null;
+            }
+
+            if ($key === 'trades') {
+                $decoded = json_decode($trimmed, true);
+                if (is_array($decoded)) {
+                    $trades = [];
+                    foreach ($decoded as $trade) {
+                        $tradeValue = trim((string) $trade);
+                        if ($tradeValue !== '') {
+                            $trades[] = $tradeValue;
+                        }
+                    }
+
+                    return $key . ': ' . ($trades === [] ? '[]' : implode(', ', $trades));
+                }
+            }
+
+            return $key . ': ' . $trimmed;
+        }
+
+        if (is_array($value)) {
+            if ($value === []) {
+                return $key . ': []';
+            }
+
+            return $key . ': ' . json_encode($value, JSON_UNESCAPED_SLASHES);
+        }
+
+        return $key . ': ' . (string) $value;
     }
 }

@@ -1,0 +1,225 @@
+{
+  "info": {
+    "name": "REMS Project Intake API",
+    "description": "Single all-in-one project intake request (2 projects, each with own files).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "6ce1f94c-b787-4e09-a24f-3d2ef6ef3e6d"
+  },
+  "item": [
+    {
+      "name": "Submit - Form Data (2 Projects, Own Files)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "name",
+              "value": "Customer Name",
+              "type": "text"
+            },
+            {
+              "key": "email",
+              "value": "example@gmail.com",
+              "type": "text"
+            },
+            {
+              "key": "company",
+              "value": "Acme",
+              "type": "text"
+            },
+            {
+              "key": "phone",
+              "value": "0928390423",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][nature]",
+              "value": "Full Build",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][scope]",
+              "value": "New 5-story office building",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][estimateType]",
+              "value": "complete",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][plansUrl]",
+              "value": "https://dropbox.com/...",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][zipCode]",
+              "value": "90210",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][deadline]",
+              "value": "standard",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][deadlineDate]",
+              "value": "2026-05-01",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][estimated_amount]",
+              "value": "150000",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][trades][]",
+              "value": "Site Work Takeoff & Estimating",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][trades][]",
+              "value": "Concrete Takeoff & Estimating",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][project_title]",
+              "value": "Warehouse Retrofit",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][project_description]",
+              "value": "Retrofit HVAC and concrete patching",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][nature]",
+              "value": "Renovation",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][scope]",
+              "value": "Warehouse retrofit project",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][estimateType]",
+              "value": "partial",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][plansUrl]",
+              "value": "https://dropbox.com/...",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][zipCode]",
+              "value": "10001",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][deadline]",
+              "value": "rush",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][deadlineDate]",
+              "value": "2026-05-10",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][estimated_amount]",
+              "value": "85000",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][trades][]",
+              "value": "Concrete Takeoff & Estimating",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][files][]",
+              "type": "file",
+              "src": "{{filePath1}}"
+            },
+            {
+              "key": "projects[0][files][]",
+              "type": "file",
+              "src": "{{filePath2}}"
+            },
+            {
+              "key": "projects[1][files][]",
+              "type": "file",
+              "src": "{{filePath3}}"
+            },
+            {
+              "key": "projects[1][files][]",
+              "type": "file",
+              "src": "{{filePath4}}"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/projects/submit",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects",
+            "submit"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Download Secure File",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-File-Password",
+            "value": "1234",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/projects/files/{{fileToken}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "projects",
+            "files",
+            "{{fileToken}}"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost/rems-portal/public"
+    },
+    {
+      "key": "filePath1",
+      "value": "C:/path/to/plan-1.pdf"
+    },
+    {
+      "key": "filePath2",
+      "value": "C:/path/to/plan-2.pdf"
+    },
+    {
+      "key": "filePath3",
+      "value": "C:/path/to/plan-3.pdf"
+    },
+    {
+      "key": "filePath4",
+      "value": "C:/path/to/plan-4.pdf"
+    }
+  ]
+}

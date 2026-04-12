@@ -29,7 +29,11 @@ class BaseApiController extends BaseController
      */
     protected function getJson()
     {
-        $json = $this->request->getJSON(true);
+        try {
+            $json = $this->request->getJSON(true);
+        } catch (\Throwable $exception) {
+            $json = [];
+        }
 
         return is_array($json) ? $json : [];
     }
@@ -41,7 +45,12 @@ class BaseApiController extends BaseController
     {
         $data = [];
 
-        $json = $this->request->getJSON(true);
+        try {
+            $json = $this->request->getJSON(true);
+        } catch (\Throwable $exception) {
+            $json = [];
+        }
+
         if (is_array($json) && !empty($json)) {
             $data = array_merge($data, $json);
         }

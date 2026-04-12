@@ -13,17 +13,25 @@ class ProjectModel extends Model
     protected $protectFields = true;
 
     protected $allowedFields = [
-        'client_name',
-        'client_email',
-        'client_phone',
+        'customer_id',
         'project_title',
         'project_description',
-        'file_links',
+        'nature',
+        'trades',
+        'scope',
+        'estimate_type',
+        'plans_url',
+        'zip_code',
+        'deadline',
+        'deadline_date',
+        'estimated_amount',
         'status',
-        'square_customer_id',
         'square_order_id',
         'square_estimate_id',
         'square_error',
+        'square_sync_attempts',
+        'square_sync_queued_at',
+        'square_synced_at',
     ];
 
     protected $useTimestamps = true;

@@ -27,6 +27,27 @@ class FileUploadService
             ]);
         }
 
+        return $this->uploadFromUploadedFile($file, $fieldName, $directory, $allowedExtensions, $maxSizeKb);
+    }
+
+    /**
+     * Upload a file from an UploadedFile instance.
+     *
+     * @return array{status:bool,message:string,data?:array,errors?:array}
+     */
+    public function uploadFromUploadedFile(
+        UploadedFile $file,
+        string $fieldName,
+        string $directory = '',
+        array $allowedExtensions = [],
+        int $maxSizeKb = 5120
+    ): array {
+        if ($file->hasMoved()) {
+            return $this->error('File was already processed.', [
+                $fieldName => 'This upload has already been moved to a destination.',
+            ]);
+        }
+
         if (!$file->isValid()) {
             return $this->error($this->mapUploadError($file->getError()), [
                 $fieldName => $file->getErrorString(),
@@ -69,6 +90,54 @@ class FileUploadService
                 'relative_path' => $this->relativePath($directory, $storedName),
                 'full_path'     => rtrim($targetDir, '/\\') . DIRECTORY_SEPARATOR . $storedName,
             ],
+        ];
+    }
+
+    /**
+     * Upload multiple uploaded files using the same validation rules.
+     *
+     * @param array<int, UploadedFile> $files
+     * @return array{status:bool,message:string,data:array<int,array<string,mixed>>,errors?:array<int,array<string,mixed>>}
+     */
+    public function uploadMany(
+        array $files,
+        string $directory = '',
+        array $allowedExtensions = [],
+        int $maxSizeKb = 5120
+    ): array {
+        $uploaded = [];
+        $errors = [];
+
+        foreach ($files as $index => $file) {
+            if (!$file instanceof UploadedFile) {
+                continue;
+            }
+
+            $result = $this->uploadFromUploadedFile(
+                $file,
+                'files.' . $index,
+                $directory,
+                $allowedExtensions,
+                $maxSizeKb
+            );
+
+            if (($result['status'] ?? false) !== true) {
+                $errors[] = [
+                    'index' => $index,
+                    'message' => $result['message'] ?? 'Upload failed.',
+                    'errors' => $result['errors'] ?? [],
+                ];
+                continue;
+            }
+
+            $uploaded[] = $result['data'];
+        }
+
+        return [
+            'status' => $errors === [],
+            'message' => $errors === [] ? 'Files uploaded successfully.' : 'Some files failed to upload.',
+            'data' => $uploaded,
+            'errors' => $errors === [] ? null : $errors,
         ];
     }
 

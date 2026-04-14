@@ -312,7 +312,7 @@ class ProjectIntakeController extends BaseApiController
             }
 
 
-            if ($item['plans_url'] !== '' && !filter_var($item['plans_url'], FILTER_VALIDATE_URL)) {
+            if ($item['plans_url'] !== '' && !$this->isValidPlansUrl($item['plans_url'])) {
                 $errors['projects.' . $index . '.plansUrl'] = 'Plans URL must be a valid URL.';
             }
 
@@ -716,6 +716,25 @@ class ProjectIntakeController extends BaseApiController
         }
 
         return preg_match('/^\+[1-9][0-9]{7,14}$/', $value) === 1;
+    }
+
+    private function isValidPlansUrl(string $url): bool
+    {
+        $value = trim($url);
+        if ($value === '') {
+            return false;
+        }
+
+        if (filter_var($value, FILTER_VALIDATE_URL)) {
+            return true;
+        }
+
+        // Accept host-only style entries like www.example.com.
+        if (stripos($value, 'www.') === 0 && strlen($value) > 4) {
+            return filter_var('https://' . $value, FILTER_VALIDATE_URL) !== false;
+        }
+
+        return false;
     }
 
     /**

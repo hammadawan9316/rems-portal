@@ -61,10 +61,11 @@ class FileUploadService
             ]);
         }
 
-        $sizeKb = (int) ceil($file->getSizeByUnit('kb'));
+        $sizeKb = (int) ceil((float) $file->getSizeByUnit('kb'));
         if ($sizeKb > $maxSizeKb) {
+            $maxSizeMb = round($maxSizeKb / 1024, 2);
             return $this->error('File too large.', [
-                $fieldName => "Maximum size is {$maxSizeKb}KB.",
+                $fieldName => "Maximum file size is {$maxSizeMb}MB ({$maxSizeKb}KB).",
             ]);
         }
 

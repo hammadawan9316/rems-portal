@@ -359,11 +359,23 @@ class ProjectIntakeController extends BaseApiController
                     continue;
                 }
 
-                $result = $this->uploadService->uploadMany($flatProjectFiles, $directory, [], 10240);
+                $result = $this->uploadService->uploadMany($flatProjectFiles, $directory, [], 512000);
                 $uploaded = is_array($result['data'] ?? null) ? $result['data'] : [];
 
                 if (($result['status'] ?? false) !== true && $uploaded === []) {
-                    return ['error' => 'Unable to store uploaded files for project index ' . $index . '.'];
+                    $errorMessages = [];
+                    $uploadErrors = $result['errors'] ?? [];
+                    foreach ($uploadErrors as $error) {
+                        if (is_array($error['errors'] ?? null)) {
+                            foreach ($error['errors'] as $fieldError) {
+                                $errorMessages[] = $fieldError;
+                            }
+                        } elseif (isset($error['message'])) {
+                            $errorMessages[] = $error['message'];
+                        }
+                    }
+                    $errorMsg = !empty($errorMessages) ? implode(' | ', $errorMessages) : 'Unable to store uploaded files for project index ' . $index . '.';
+                    return ['error' => $errorMsg];
                 }
 
                 $indexInt = (int) $index;
@@ -384,11 +396,23 @@ class ProjectIntakeController extends BaseApiController
             $flatLegacyFiles = [];
             $this->flattenFiles(['files' => $legacyFiles], $flatLegacyFiles);
             if ($flatLegacyFiles !== []) {
-                $result = $this->uploadService->uploadMany($flatLegacyFiles, $directory, [], 10240);
+                $result = $this->uploadService->uploadMany($flatLegacyFiles, $directory, [], 512000);
                 $uploaded = is_array($result['data'] ?? null) ? $result['data'] : [];
 
                 if (($result['status'] ?? false) !== true && $uploaded === []) {
-                    return ['error' => 'Unable to store uploaded files.'];
+                    $errorMessages = [];
+                    $uploadErrors = $result['errors'] ?? [];
+                    foreach ($uploadErrors as $error) {
+                        if (is_array($error['errors'] ?? null)) {
+                            foreach ($error['errors'] as $fieldError) {
+                                $errorMessages[] = $fieldError;
+                            }
+                        } elseif (isset($error['message'])) {
+                            $errorMessages[] = $error['message'];
+                        }
+                    }
+                    $errorMsg = !empty($errorMessages) ? implode(' | ', $errorMessages) : 'Unable to store uploaded files.';
+                    return ['error' => $errorMsg];
                 }
 
                 $targetIndex = 0;

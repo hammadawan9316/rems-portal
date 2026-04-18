@@ -13,6 +13,7 @@ class CustomerModel extends Model
     protected $protectFields = true;
 
     protected $allowedFields = [
+        'user_id',
         'name',
         'email',
         'phone',
@@ -24,4 +25,25 @@ class CustomerModel extends Model
     protected $dateFormat = 'datetime';
     protected $createdField = 'created_at';
     protected $updatedField = 'updated_at';
+
+    public function findByEmail(string $email): ?array
+    {
+        $customer = $this->where('email', trim($email))->first();
+
+        return is_array($customer) ? $customer : null;
+    }
+
+    public function findByUserId(int $userId): ?array
+    {
+        $customer = $this->where('user_id', $userId)->first();
+
+        return is_array($customer) ? $customer : null;
+    }
+
+    public function linkUser(int $customerId, ?int $userId): bool
+    {
+        return $this->update($customerId, [
+            'user_id' => $userId,
+        ]);
+    }
 }

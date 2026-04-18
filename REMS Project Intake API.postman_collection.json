@@ -1,0 +1,214 @@
+{
+  "info": {
+    "_postman_id": "2e6eb30a-05e1-44a2-bfa6-2d5732c77e2c",
+    "name": "REMS Project Intake API",
+    "description": "Single all-in-one project intake request (2 projects, each with own files).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "24233111"
+  },
+  "item": [
+    {
+      "name": "Submit - Form Data (2 Projects, Own Files)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "name",
+              "value": "Customer Name",
+              "type": "text"
+            },
+            {
+              "key": "email",
+              "value": "example@gmail.com",
+              "type": "text"
+            },
+            {
+              "key": "company",
+              "value": "Acme",
+              "type": "text"
+            },
+            {
+              "key": "phone",
+              "value": "+14155552671",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][nature]",
+              "value": "Full Build",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][scope]",
+              "value": "New 5-story office building",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][estimateType]",
+              "value": "complete",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][plansUrl]",
+              "value": "https://dropbox.com/...",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][zipCode]",
+              "value": "90210",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][deadline]",
+              "value": "standard",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][deadlineDate]",
+              "value": "2026-05-01",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][trades][]",
+              "value": "Site Work Takeoff & Estimating",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][trades][]",
+              "value": "Concrete Takeoff & Estimating",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][project_title]",
+              "value": "Warehouse Retrofit",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][project_description]",
+              "value": "Retrofit HVAC and concrete patching",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][nature]",
+              "value": "Renovation",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][scope]",
+              "value": "Warehouse retrofit project",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][estimateType]",
+              "value": "partial",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][plansUrl]",
+              "value": "https://dropbox.com/...",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][zipCode]",
+              "value": "10001",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][deadline]",
+              "value": "rush",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][deadlineDate]",
+              "value": "2026-05-10",
+              "type": "text"
+            },
+            {
+              "key": "projects[1][trades][]",
+              "value": "Concrete Takeoff & Estimating",
+              "type": "text"
+            },
+            {
+              "key": "projects[0][files][]",
+              "type": "file",
+              "src": "/C:/Users/Hp/Downloads/slazzer-preview-d0qoq.png"
+            },
+            {
+              "key": "projects[0][files][]",
+              "type": "file",
+              "src": "/C:/Users/Hp/Downloads/photo-1600880292203-757bb62b4baf (1).jpg"
+            },
+            {
+              "key": "projects[1][files][]",
+              "type": "file",
+              "src": "/C:/Users/Hp/Downloads/socail-security-card.png"
+            },
+            {
+              "key": "projects[1][files][]",
+              "type": "file",
+              "src": "/C:/Users/Hp/Downloads/WhatsApp Image 2026-04-10 at 7.15.27 PM.jpeg"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}projects/submit",
+          "host": [
+            "{{baseUrl}}projects"
+          ],
+          "path": [
+            "submit"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Download Secure File",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-File-Password",
+            "value": "KkDa2FCenk",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}projects/files/{{fileToken}}",
+          "host": [
+            "{{baseUrl}}projects"
+          ],
+          "path": [
+            "files",
+            "{{fileToken}}"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost/rems-portal/public"
+    },
+    {
+      "key": "filePath1",
+      "value": "C:/path/to/plan-1.pdf"
+    },
+    {
+      "key": "filePath2",
+      "value": "C:/path/to/plan-2.pdf"
+    },
+    {
+      "key": "filePath3",
+      "value": "C:/path/to/plan-3.pdf"
+    },
+    {
+      "key": "filePath4",
+      "value": "C:/path/to/plan-4.pdf"
+    }
+  ]
+}

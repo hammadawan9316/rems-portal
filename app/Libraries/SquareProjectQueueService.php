@@ -3,9 +3,12 @@
 namespace App\Libraries;
 
 use App\Models\EmailQueueModel;
+use App\Models\CategoryModel;
 use App\Models\CustomerModel;
 use App\Models\ProjectFileModel;
 use App\Models\ProjectModel;
+use App\Models\ProjectServiceModel;
+use App\Models\QuotationModel;
 use Config\App;
 
 class SquareProjectQueueService
@@ -15,22 +18,28 @@ class SquareProjectQueueService
 
     protected EmailQueueModel $queueModel;
     protected ProjectModel $projectModel;
+    protected ProjectServiceModel $projectServiceModel;
+    protected CategoryModel $categoryModel;
     protected CustomerModel $customerModel;
     protected ProjectFileModel $projectFileModel;
+    protected QuotationModel $quotationModel;
 
     public function __construct()
     {
         $this->queueModel = new EmailQueueModel();
         $this->projectModel = new ProjectModel();
+        $this->projectServiceModel = new ProjectServiceModel();
+        $this->categoryModel = new CategoryModel();
         $this->customerModel = new CustomerModel();
         $this->projectFileModel = new ProjectFileModel();
+        $this->quotationModel = new QuotationModel();
     }
 
-    public function enqueue(int $projectId, string $priority = 'default', int $availableAt = 0): int
+    public function enqueue(int $quotationId, string $priority = 'default', int $availableAt = 0): int
     {
         $payload = [
-            'job' => 'square_project_sync',
-            'project_id' => $projectId,
+            'job' => 'square_quotation_sync',
+            'quotation_id' => $quotationId,
             'created_at_iso' => date('c'),
             'max_attempts' => 5,
         ];
@@ -77,22 +86,55 @@ class SquareProjectQueueService
             $this->queueModel->update($jobId, ['status' => self::STATUS_PROCESSING]);
 
             $payload = json_decode((string) ($job['payload'] ?? ''), true);
-            $projectId = (int) ($payload['project_id'] ?? 0);
-            if ($projectId < 1) {
-                $this->moveToFailed($job, 'Square queue payload is missing a project_id.');
+            $quotationId = (int) ($payload['quotation_id'] ?? 0);
+            if ($quotationId < 1) {
+                $this->moveToFailed($job, 'Square queue payload is missing a quotation_id.');
                 $result['failed']++;
                 continue;
             }
 
-            $project = $this->projectModel->find($projectId);
-            if (!is_array($project)) {
-                $this->moveToFailed($job, 'Project not found for Square sync.');
+            $quotation = $this->quotationModel->find($quotationId);
+            if (!is_array($quotation)) {
+                $this->moveToFailed($job, 'Quotation not found for Square sync.');
                 $result['failed']++;
                 continue;
             }
+
+            $projects = $this->projectModel
+                ->where('quotation_id', $quotationId)
+                ->orderBy('id', 'ASC')
+                ->findAll();
+
+            if ($projects === []) {
+                $this->moveToFailed($job, 'Quotation has no projects for Square sync.');
+                $result['failed']++;
+                continue;
+            }
+
+            $projectIds = array_map(static fn (array $project): int => (int) ($project['id'] ?? 0), $projects);
+            $projectIds = array_values(array_filter($projectIds, static fn (int $id): bool => $id > 0));
+            $categoryIds = array_map(static fn (array $project): int => (int) ($project['category_id'] ?? 0), $projects);
+            $categoryIds = array_values(array_unique(array_filter($categoryIds, static fn (int $id): bool => $id > 0)));
+
+            $categoryNamesById = [];
+            if ($categoryIds !== []) {
+                $categoryRows = $this->categoryModel->whereIn('id', $categoryIds)->findAll();
+                foreach ($categoryRows as $categoryRow) {
+                    if (!is_array($categoryRow)) {
+                        continue;
+                    }
+
+                    $categoryId = (int) ($categoryRow['id'] ?? 0);
+                    if ($categoryId > 0) {
+                        $categoryNamesById[$categoryId] = trim((string) ($categoryRow['name'] ?? ''));
+                    }
+                }
+            }
+
+            $servicesByProject = $this->projectServiceModel->getServiceNamesByProjectIds($projectIds);
 
             try {
-                $customerProfile = $this->resolveCustomerProfile($project);
+                $customerProfile = $this->resolveCustomerProfileForQuotation($quotation, $projects);
                 if ($customerProfile['email'] === '') {
                     throw new \RuntimeException('Customer email is required before Square sync can run.');
                 }
@@ -107,66 +149,122 @@ class SquareProjectQueueService
                     ]);
                 }
 
-                $fileRows = $this->projectFileModel
-                    ->where('project_id', $projectId)
-                    ->orderBy('id', 'ASC')
-                    ->findAll();
-
-                $fileLinks = [];
                 /** @var App $appConfig */
                 $appConfig = config('App');
                 $baseUrl = rtrim((string) $appConfig->baseURL, '/');
-                foreach ($fileRows as $fileRow) {
-                    if (!is_array($fileRow)) {
+                $projectEntries = [];
+                foreach ($projects as $project) {
+                    if (!is_array($project)) {
                         continue;
                     }
 
-                    $token = trim((string) ($fileRow['public_token'] ?? ''));
-                    if ($token !== '') {
-                        $fileLinks[] = $baseUrl . '/api/projects/files/' . $token;
+                    $projectId = (int) ($project['id'] ?? 0);
+                    if ($projectId < 1) {
                         continue;
                     }
 
-                    $fallbackPath = trim((string) ($fileRow['relative_path'] ?? ''));
-                    if ($fallbackPath !== '') {
-                        $fileLinks[] = $fallbackPath;
+                    $fileRows = $this->projectFileModel
+                        ->where('project_id', $projectId)
+                        ->orderBy('id', 'ASC')
+                        ->findAll();
+
+                    $fileLinks = [];
+                    foreach ($fileRows as $fileRow) {
+                        if (!is_array($fileRow)) {
+                            continue;
+                        }
+
+                        $token = trim((string) ($fileRow['public_token'] ?? ''));
+                        if ($token !== '') {
+                            $fileLinks[] = $baseUrl . '/api/projects/files/' . $token;
+                            continue;
+                        }
+
+                        $fallbackPath = trim((string) ($fileRow['relative_path'] ?? ''));
+                        if ($fallbackPath !== '') {
+                            $fileLinks[] = $fallbackPath;
+                        }
                     }
+
+                    $estimatedAmount = null;
+                    if (($project['estimated_amount'] ?? null) !== null && (string) ($project['estimated_amount'] ?? '') !== '') {
+                        $estimatedAmount = (int) $project['estimated_amount'];
+                    }
+
+                    $paymentType = trim((string) ($project['payment_type'] ?? 'fixed_rate'));
+                    $hourlyHours = isset($project['hourly_hours']) && $project['hourly_hours'] !== '' ? (string) $project['hourly_hours'] : null;
+                    $discountType = trim((string) ($project['discount_type'] ?? ''));
+                    $discountValue = isset($project['discount_value']) && $project['discount_value'] !== '' ? (string) $project['discount_value'] : null;
+                    $discountScope = trim((string) ($project['discount_scope'] ?? 'project_total'));
+
+                    $categoryId = (int) ($project['category_id'] ?? 0);
+                    $services = $servicesByProject[$projectId] ?? [];
+
+                    $projectData = $project;
+                    $projectData['category'] = $categoryNamesById[$categoryId] ?? '';
+                    $projectData['services'] = $services;
+                    $projectData['payment_type'] = $paymentType !== '' ? $paymentType : 'fixed_rate';
+                    $projectData['hourly_hours'] = $hourlyHours;
+                    $projectData['discount_type'] = $discountType !== '' ? $discountType : null;
+                    $projectData['discount_value'] = $discountValue;
+                    $projectData['discount_scope'] = $discountScope !== '' ? $discountScope : 'project_total';
+
+                    $projectEntries[] = [
+                        'project_id' => $projectId,
+                        'project_title' => (string) ($project['project_title'] ?? 'Project Estimate'),
+                        'project_description' => (string) ($project['project_description'] ?? ''),
+                        'project_data' => $projectData,
+                        'file_links' => $fileLinks,
+                        'estimated_amount_cents' => $estimatedAmount,
+                    ];
                 }
 
-                $estimatedAmount = null;
-                if (($project['estimated_amount'] ?? null) !== null && (string) ($project['estimated_amount'] ?? '') !== '') {
-                    $estimatedAmount = (int) $project['estimated_amount'];
+                if ($projectEntries === []) {
+                    throw new \RuntimeException('No valid projects available to build Square quotation invoice.');
                 }
 
-                $estimate = $square->createDraftEstimateForProject(
-                    $projectId,
+                $estimate = $square->createDraftEstimateForQuotation(
+                    $quotationId,
                     (string) $customer['id'],
-                    (string) ($project['project_title'] ?? 'Project Estimate'),
-                    (string) ($project['project_description'] ?? ''),
-                    $project,
-                    $fileLinks,
-                    $estimatedAmount
+                    (string) ($quotation['title'] ?? ('Quotation #' . $quotationId)),
+                    $quotation,
+                    $projectEntries
                 );
 
-                $this->projectModel->update($projectId, [
-                    'customer_id' => (int) ($customerProfile['id'] ?? ($project['customer_id'] ?? 0)) ?: null,
+                $this->quotationModel->update($quotationId, [
+                    'status' => 'estimate_draft_created',
                     'square_order_id' => (string) ($estimate['order_id'] ?? null),
-                    'square_estimate_id' => (string) ($estimate['estimate_id'] ?? null),
+                    'square_invoice_id' => (string) ($estimate['estimate_id'] ?? null),
+                    'square_status' => (string) ($estimate['status'] ?? null),
                     'square_error' => null,
                     'square_synced_at' => date('Y-m-d H:i:s'),
-                    'status' => 'estimate_draft_created',
                 ]);
+
+                foreach ($projectEntries as $entry) {
+                    $projectId = (int) ($entry['project_id'] ?? 0);
+                    if ($projectId < 1) {
+                        continue;
+                    }
+
+                    $this->projectModel->update($projectId, [
+                        'customer_id' => (int) ($customerProfile['id'] ?? 0) ?: null,
+                        'status' => 'estimate_draft_created',
+                    ]);
+                }
 
                 $this->queueModel->delete($jobId);
                 $result['synced']++;
 
-                $freshProject = $this->projectModel->find($projectId);
+                $freshProject = $this->projectModel
+                    ->where('quotation_id', $quotationId)
+                    ->orderBy('id', 'ASC')
+                    ->first();
                 if (is_array($freshProject)) {
                     try {
                         $this->queueCustomerSquareReadyEmail($freshProject);
                     } catch (\Throwable $emailException) {
                         log_message('error', 'Square sync email queue failed. project_id={projectId}, error={error}', [
-                            'projectId' => $projectId,
+                            'projectId' => (int) ($freshProject['id'] ?? 0),
                             'error' => $emailException->getMessage(),
                         ]);
                     }
@@ -175,24 +273,40 @@ class SquareProjectQueueService
                 $attempts = (int) $job['attempts'] + 1;
                 $maxAttempts = max(1, (int) ($payload['max_attempts'] ?? 5));
 
-                log_message('error', 'Square queue sync failed. job_id={jobId}, project_id={projectId}, attempt={attempt}/{maxAttempts}, error={error}', [
+                log_message('error', 'Square queue sync failed. job_id={jobId}, quotation_id={quotationId}, attempt={attempt}/{maxAttempts}, error={error}', [
                     'jobId' => $jobId,
-                    'projectId' => $projectId,
+                    'quotationId' => $quotationId,
                     'attempt' => $attempts,
                     'maxAttempts' => $maxAttempts,
                     'error' => $exception->getMessage(),
                 ]);
 
-                $this->projectModel->update($projectId, [
+                $this->quotationModel->update($quotationId, [
                     'status' => 'square_failed',
                     'square_error' => $exception->getMessage(),
-                    'square_sync_attempts' => $attempts,
                 ]);
 
+                $projects = $this->projectModel
+                    ->where('quotation_id', $quotationId)
+                    ->orderBy('id', 'ASC')
+                    ->findAll();
+                foreach ($projects as $project) {
+                    if (!is_array($project)) {
+                        continue;
+                    }
+                    $projectId = (int) ($project['id'] ?? 0);
+                    if ($projectId < 1) {
+                        continue;
+                    }
+                    $this->projectModel->update($projectId, [
+                        'status' => 'square_failed',
+                    ]);
+                }
+
                 if ($attempts >= $maxAttempts) {
-                    log_message('error', 'Square queue sync moved to failed table. job_id={jobId}, project_id={projectId}, attempts={attempts}, error={error}', [
+                    log_message('error', 'Square queue sync moved to failed table. job_id={jobId}, quotation_id={quotationId}, attempts={attempts}, error={error}', [
                         'jobId' => $jobId,
-                        'projectId' => $projectId,
+                        'quotationId' => $quotationId,
                         'attempts' => $attempts,
                         'error' => $exception->getMessage(),
                     ]);
@@ -254,6 +368,43 @@ class SquareProjectQueueService
         ]);
 
         $emailQueue->queue($to, $subject, $body, ['mail_type' => 'html']);
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     * @param array<int, array<string, mixed>> $projects
+     * @return array{id:int,name:string,email:string,phone:?string,square_customer_id:?string}
+     */
+    private function resolveCustomerProfileForQuotation(array $quotation, array $projects): array
+    {
+        $customerId = (int) ($quotation['customer_id'] ?? 0);
+        if ($customerId > 0) {
+            $customer = $this->customerModel->find($customerId);
+            if (is_array($customer)) {
+                return [
+                    'id' => (int) ($customer['id'] ?? 0),
+                    'name' => trim((string) ($customer['name'] ?? '')),
+                    'email' => trim((string) ($customer['email'] ?? '')),
+                    'phone' => (($customer['phone'] ?? '') === '' ? null : (string) $customer['phone']),
+                    'square_customer_id' => (($customer['square_customer_id'] ?? '') === '' ? null : (string) $customer['square_customer_id']),
+                ];
+            }
+        }
+
+        if ($projects !== []) {
+            $first = $projects[0];
+            if (is_array($first)) {
+                return $this->resolveCustomerProfile($first);
+            }
+        }
+
+        return [
+            'id' => 0,
+            'name' => '',
+            'email' => '',
+            'phone' => null,
+            'square_customer_id' => null,
+        ];
     }
 
     /**

@@ -13,7 +13,6 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
     $routes->post('auth/login', 'AuthenticationController::login');
     $routes->post('auth/forgot-password', 'AuthenticationController::forgotPassword');
     $routes->post('auth/reset-password', 'AuthenticationController::resetPassword');
-    $routes->get('projects/files/(:segment)', 'ProjectIntakeController::downloadFile/$1');
 
     // Protected auth routes
     $routes->group('auth', ['filter' => 'jwtAuth'], function ($routes) {
@@ -21,6 +20,37 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
         $routes->post('change-password', 'AuthenticationController::changePassword');
         $routes->get('me', 'AuthenticationController::getCurrentUser');
         $routes->post('logout', 'AuthenticationController::logout');
+    });
+
+    // Public project intake routes
+    $routes->get('projects/files/(:segment)', 'ProjectIntakeController::downloadFile/$1');
+
+    // Public category and service routes
+    $routes->get('categories', 'CategoryController::index');
+    $routes->get('categories/(:num)', 'CategoryController::show/$1');
+    $routes->get('services', 'ServiceController::index');
+    $routes->get('services/(:num)', 'ServiceController::show/$1');
+    $routes->get('services/category/(:num)', 'ServiceController::byCategory/$1');
+
+    // Admin-only category routes
+    $routes->group('', ['filter' => 'jwtAuth'], function ($routes) {
+        $routes->group('', ['filter' => 'roleAccess:admin'], function ($routes) {
+            $routes->post('categories', 'CategoryController::store');
+            $routes->put('categories/(:num)', 'CategoryController::update/$1');
+            $routes->patch('categories/(:num)', 'CategoryController::update/$1');
+            $routes->delete('categories/(:num)', 'CategoryController::delete/$1');
+
+            $routes->post('services', 'ServiceController::store');
+            $routes->put('services/(:num)', 'ServiceController::update/$1');
+            $routes->patch('services/(:num)', 'ServiceController::update/$1');
+            $routes->delete('services/(:num)', 'ServiceController::delete/$1');
+
+            $routes->get('quotations', 'QuotationController::index');
+            $routes->post('quotations', 'QuotationController::store');
+            $routes->post('quotations/submit', 'QuotationController::submit');
+            $routes->get('quotations/(:num)', 'QuotationController::show/$1');
+            $routes->get('customers/(:num)/quotations', 'QuotationController::byCustomer/$1');
+        });
     });
 
     // Project intake routes

@@ -72,8 +72,8 @@ class SquareService
         $details = [
             'project_title' => $projectTitle,
             'project_description' => $description,
-            'nature' => $projectData['nature'] ?? null,
-            'trades' => $projectData['trades'] ?? null,
+            'category' => $projectData['category'] ?? null,
+            'services' => $projectData['services'] ?? null,
             'scope' => $projectData['scope'] ?? null,
             'estimate_type' => $projectData['estimate_type'] ?? null,
             'plans_url' => $projectData['plans_url'] ?? null,
@@ -177,6 +177,143 @@ class SquareService
         ];
     }
 
+    /**
+     * Create one Square draft invoice for a quotation with multiple projects.
+     *
+     * @param array<string, mixed> $quotation
+     * @param array<int, array{project_id:int,project_title:string,project_description:string,project_data:array<string,mixed>,file_links:array<int,string>,estimated_amount_cents:?int}> $projects
+     * @return array{order_id:string,estimate_id:string,status:string}
+     */
+    public function createDraftEstimateForQuotation(
+        int $quotationId,
+        string $customerId,
+        string $quotationTitle,
+        array $quotation,
+        array $projects
+    ): array {
+        $lineItems = [];
+
+        foreach ($projects as $project) {
+            $projectId = (int) ($project['project_id'] ?? 0);
+            $projectTitle = (string) ($project['project_title'] ?? 'Project Estimate');
+            $projectDescription = (string) ($project['project_description'] ?? '');
+            $projectData = is_array($project['project_data'] ?? null) ? $project['project_data'] : [];
+            $fileLinks = is_array($project['file_links'] ?? null) ? $project['file_links'] : [];
+            $estimatedAmountCents = isset($project['estimated_amount_cents']) ? (int) $project['estimated_amount_cents'] : null;
+
+            $noteLines = ["Project #{$projectId}: {$projectDescription}"];
+            $details = [
+                'project_title' => $projectTitle,
+                'project_description' => $projectDescription,
+                'category' => $projectData['category'] ?? null,
+                'services' => $projectData['services'] ?? null,
+                'scope' => $projectData['scope'] ?? null,
+                'estimate_type' => $projectData['estimate_type'] ?? null,
+                'plans_url' => $projectData['plans_url'] ?? null,
+                'zip_code' => $projectData['zip_code'] ?? null,
+                'deadline' => $projectData['deadline'] ?? null,
+                'deadline_date' => $projectData['deadline_date'] ?? null,
+                'estimated_amount' => $estimatedAmountCents,
+                'payment_type' => $projectData['payment_type'] ?? null,
+                'hourly_hours' => $projectData['hourly_hours'] ?? null,
+                'discount_type' => $projectData['discount_type'] ?? null,
+                'discount_value' => $projectData['discount_value'] ?? null,
+                'discount_scope' => $projectData['discount_scope'] ?? null,
+            ];
+
+            $noteLines[] = '';
+            $noteLines[] = 'Project Details:';
+            foreach ($details as $key => $value) {
+                $formatted = $this->formatProjectField($key, $value);
+                if ($formatted !== null) {
+                    $noteLines[] = '- ' . $formatted;
+                }
+            }
+
+            if ($fileLinks !== []) {
+                $noteLines[] = '';
+                $noteLines[] = 'File Links:';
+                foreach ($fileLinks as $link) {
+                    $candidate = trim((string) $link);
+                    if ($candidate !== '') {
+                        $noteLines[] = '- ' . $candidate;
+                    }
+                }
+            }
+
+            $lineItems[] = [
+                'name' => $projectTitle,
+                'quantity' => '1',
+                'note' => implode("\n", $noteLines),
+                'base_price_money' => [
+                    'amount' => $estimatedAmountCents === null ? 0 : max(0, $estimatedAmountCents),
+                    'currency' => $this->config->currency,
+                ],
+            ];
+        }
+
+        if ($lineItems === []) {
+            throw new \RuntimeException('Cannot create Square quotation invoice without project line items.');
+        }
+
+        $orderPayload = [
+            'idempotency_key' => $this->idempotencyKey('quotation-order', $quotationId),
+            'order' => [
+                'location_id' => $this->config->locationId,
+                'customer_id' => $customerId,
+                'reference_id' => 'quotation-' . $quotationId,
+                'line_items' => $lineItems,
+            ],
+        ];
+
+        $orderRes = $this->request('POST', '/v2/orders', $orderPayload);
+        $orderId = (string) ($orderRes['order']['id'] ?? '');
+        if ($orderId === '') {
+            throw new \RuntimeException('Square order creation failed for quotation invoice.');
+        }
+
+        $invoicePayload = [
+            'idempotency_key' => $this->idempotencyKey('quotation-invoice', $quotationId),
+            'invoice' => [
+                'location_id' => $this->config->locationId,
+                'order_id' => $orderId,
+                'primary_recipient' => [
+                    'customer_id' => $customerId,
+                ],
+                'delivery_method' => 'EMAIL',
+                'title' => 'Quotation ' . $quotationTitle,
+                'description' => 'Draft invoice linked to quotation #' . $quotationId,
+                'accepted_payment_methods' => [
+                    'card' => true,
+                    'square_gift_card' => false,
+                    'bank_account' => false,
+                    'buy_now_pay_later' => false,
+                    'cash_app_pay' => false,
+                ],
+                'payment_requests' => [
+                    [
+                        'request_type' => 'BALANCE',
+                        'due_date' => date('Y-m-d', strtotime('+7 days')),
+                    ],
+                ],
+            ],
+        ];
+
+        $invoiceRes = $this->request('POST', '/v2/invoices', $invoicePayload);
+        $invoiceId = (string) ($invoiceRes['invoice']['id'] ?? '');
+        $status = (string) ($invoiceRes['invoice']['status'] ?? 'DRAFT');
+
+        if ($invoiceId === '') {
+            throw new \RuntimeException('Square quotation invoice draft creation failed.');
+        }
+
+        return [
+            'order_id' => $orderId,
+            'estimate_id' => $invoiceId,
+            'status' => $status,
+        ];
+    }
+
     private function searchCustomerByEmail(string $email): ?string
     {
         $response = $this->request('POST', '/v2/customers/search', [
@@ -269,8 +406,10 @@ class SquareService
      */
     private function formatProjectField(string $key, $value): ?string
     {
+        $fieldName = $key;
+
         if ($value === null) {
-            return $key . ': null';
+            return $fieldName . ': null';
         }
 
         if (is_string($value)) {
@@ -279,32 +418,32 @@ class SquareService
                 return null;
             }
 
-            if ($key === 'trades') {
+            if ($fieldName === 'services') {
                 $decoded = json_decode($trimmed, true);
                 if (is_array($decoded)) {
-                    $trades = [];
-                    foreach ($decoded as $trade) {
-                        $tradeValue = trim((string) $trade);
-                        if ($tradeValue !== '') {
-                            $trades[] = $tradeValue;
+                    $services = [];
+                    foreach ($decoded as $service) {
+                        $serviceValue = trim((string) $service);
+                        if ($serviceValue !== '') {
+                            $services[] = $serviceValue;
                         }
                     }
 
-                    return $key . ': ' . ($trades === [] ? '[]' : implode(', ', $trades));
+                    return $fieldName . ': ' . ($services === [] ? '[]' : implode(', ', $services));
                 }
             }
 
-            return $key . ': ' . $trimmed;
+            return $fieldName . ': ' . $trimmed;
         }
 
         if (is_array($value)) {
             if ($value === []) {
-                return $key . ': []';
+                return $fieldName . ': []';
             }
 
-            return $key . ': ' . json_encode($value, JSON_UNESCAPED_SLASHES);
+            return $fieldName . ': ' . json_encode($value, JSON_UNESCAPED_SLASHES);
         }
 
-        return $key . ': ' . (string) $value;
+        return $fieldName . ': ' . (string) $value;
     }
 }

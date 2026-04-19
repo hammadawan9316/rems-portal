@@ -4,9 +4,13 @@ namespace App\Controllers\Api;
 
 use App\Libraries\SquareProjectQueueService;
 use App\Libraries\SquareService;
+use App\Models\CategoryModel;
 use App\Models\CustomerModel;
 use App\Models\ProjectFileModel;
 use App\Models\ProjectModel;
+use App\Models\ProjectServiceModel;
+use App\Models\QuotationModel;
+use App\Models\ServiceModel;
 use CodeIgniter\HTTP\Files\UploadedFile;
 use Config\Square;
 
@@ -34,6 +38,13 @@ class ProjectIntakeController extends BaseApiController
             return $this->res->validation($projectErrors);
         }
 
+        $taxonomyResolution = $this->resolveProjectTaxonomy($projectItems);
+        if (($taxonomyResolution['errors'] ?? []) !== []) {
+            return $this->res->validation($taxonomyResolution['errors']);
+        }
+
+        $projectItems = $taxonomyResolution['projects'] ?? $projectItems;
+
         $uploadedFilesResult = $this->storeUploadedFilesByProject($projectCount);
         if (isset($uploadedFilesResult['error'])) {
             return $this->res->badRequest('File upload failed.', ['files' => $uploadedFilesResult['error']]);
@@ -42,7 +53,9 @@ class ProjectIntakeController extends BaseApiController
         $uploadedFiles = $uploadedFilesResult['all'] ?? [];
 
         $projectModel = new ProjectModel();
+        $projectServiceModel = new ProjectServiceModel();
         $customerModel = new CustomerModel();
+        $quotationModel = new QuotationModel();
         $projectFileModel = new ProjectFileModel();
         $squareQueue = new SquareProjectQueueService();
         $square = new SquareService();
@@ -54,30 +67,44 @@ class ProjectIntakeController extends BaseApiController
         $company = trim((string) ($data['company'] ?? ''));
         $customerId = $this->resolveCustomerId($customerModel, $clientName, $clientEmail, $clientPhone, $company);
 
+        $quotationId = $this->createQuotation(
+            $quotationModel,
+            $customerId,
+            $projectItems,
+            $clientName,
+            $clientEmail
+        );
+
         $createdProjects = [];
         $squareResults = [];
         $secureFiles = [];
+        $projectsByFile = [];  // Track files by project for quotation email
 
         foreach ($projectItems as $index => $item) {
             $projectData = [
                 'customer_id' => $customerId,
+                'quotation_id' => $quotationId,
+                'category_id' => (int) ($item['category_id'] ?? 0) ?: null,
                 'project_title' => $item['project_title'],
                 'project_description' => $item['project_description'],
-                'nature' => $item['nature'],
-                'trades' => json_encode($item['trades'], JSON_UNESCAPED_SLASHES),
                 'scope' => $item['scope'],
                 'estimate_type' => $item['estimate_type'],
                 'plans_url' => $item['plans_url'],
                 'zip_code' => $item['zip_code'],
                 'deadline' => $item['deadline'],
                 'deadline_date' => $item['deadline_date'],
-                'estimated_amount' => null,
-                'status' => $isSquareConfigured ? 'square_queued' : 'square_skipped',
-                'square_sync_queued_at' => $isSquareConfigured ? date('Y-m-d H:i:s') : null,
+                'estimated_amount' => $item['estimated_amount'],
+                'payment_type' => $item['payment_type'],
+                'hourly_hours' => $item['hourly_hours'],
+                'discount_type' => $item['discount_type'],
+                'discount_value' => $item['discount_value'],
+                'discount_scope' => $item['discount_scope'],
+                'status' => 'submitted',
             ];
 
             $projectModel->insert($projectData);
             $projectId = (int) $projectModel->getInsertID();
+            $projectServiceModel->replaceServices($projectId, is_array($item['service_ids'] ?? null) ? $item['service_ids'] : []);
 
             $projectUploadedFiles = [];
             if (isset($uploadedFilesByProject[$index]) && is_array($uploadedFilesByProject[$index])) {
@@ -90,6 +117,7 @@ class ProjectIntakeController extends BaseApiController
                 $projectUploadedFiles
             );
             $secureFiles = array_merge($secureFiles, $projectSecureFiles);
+            $projectsByFile[$projectId] = $projectSecureFiles;
 
             $squareResult = [
                 'configured' => $isSquareConfigured,
@@ -99,19 +127,6 @@ class ProjectIntakeController extends BaseApiController
                 'status' => $isSquareConfigured ? 'queued' : 'skipped',
             ];
 
-            if ($isSquareConfigured) {
-                $squareQueue->enqueue($projectId);
-            }
-
-            $this->queueOwnerNotification(
-                $projectId,
-                $projectData,
-                $clientName,
-                $clientEmail,
-                $projectSecureFiles,
-                $squareResult
-            );
-
             $savedProject = $projectModel->find($projectId);
             if (is_array($savedProject)) {
                 $createdProjects[] = $savedProject;
@@ -119,13 +134,30 @@ class ProjectIntakeController extends BaseApiController
             $squareResults[] = array_merge(['project_id' => $projectId], $squareResult);
         }
 
-        $this->queueCustomerSubmittedNotification($clientEmail, $clientName, $createdProjects, $secureFiles);
+        if ($isSquareConfigured && $quotationId !== null) {
+            $squareQueue->enqueue($quotationId);
+        }
+
+        $createdProjects = $this->formatProjectsForResponse($createdProjects);
+
+        // Send quotation-based owner notification (consolidated for all projects)
+        $this->queueOwnerNotificationForQuotation(
+            $quotationId,
+            $createdProjects,
+            $projectsByFile,
+            $clientName,
+            $clientEmail,
+            $squareResults
+        );
+
+        $this->queueCustomerSubmittedNotification($clientEmail, $clientName, $quotationId, $createdProjects, $secureFiles);
 
         $isMultiple = count($projectItems) > 1;
         $singleProject = $createdProjects[0] ?? null;
         $singleSquare = $squareResults[0] ?? null;
 
         return $this->res->created([
+            'quotation_id' => $quotationId,
             'project' => $singleProject,
             'square' => $singleSquare,
             'projects' => $createdProjects,
@@ -141,6 +173,33 @@ class ProjectIntakeController extends BaseApiController
                 'square_processing' => 'queued_for_cron',
             ],
         ], 'Project submitted successfully. Square sync queued for background processing.');
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $projectItems
+     */
+    private function createQuotation(
+        QuotationModel $quotationModel,
+        ?int $customerId,
+        array $projectItems,
+        string $clientName,
+        string $clientEmail
+    ): ?int {
+        $firstTitle = trim((string) ($projectItems[0]['project_title'] ?? ''));
+        $title = $firstTitle !== '' ? $firstTitle : 'Quotation for ' . ($clientName !== '' ? $clientName : $clientEmail);
+        $quoteNumber = $quotationModel->generateQuoteNumber();
+        $quotationModel->insert([
+            'customer_id' => $customerId,
+            'quote_number' => $quoteNumber,
+            'title' => $title,
+            'status' => 'submitted',
+            'notes' => null,
+            'submitted_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $id = (int) $quotationModel->getInsertID();
+
+        return $id > 0 ? $id : null;
     }
 
     public function downloadFile(string $token)
@@ -170,7 +229,7 @@ class ProjectIntakeController extends BaseApiController
 
     /**
      * @param array<string, mixed> $data
-     * @return array<int, array{project_title:string,project_description:string:int,nature:string,trades:array<int,string>,scope:string,estimate_type:string,plans_url:string,zip_code:string,deadline:string,deadline_date:?string}>
+    * @return array<int, array<string, mixed>>
      */
     private function extractProjectItems(array $data): array
     {
@@ -186,9 +245,14 @@ class ProjectIntakeController extends BaseApiController
                 $items[] = [
                     'project_title' => $this->resolveProjectTitle($project),
                     'project_description' => trim((string) ($project['project_description'] ?? ($project['scope'] ?? ''))),
-                        'estimated_amount' => null,
-                    'nature' => trim((string) ($project['nature'] ?? '')),
-                    'trades' => $this->normalizeTrades($project['trades'] ?? []),
+                    'estimated_amount' => $this->normalizeMoneyValue($project['estimated_amount'] ?? ($project['amount'] ?? null)),
+                    'category_id' => $this->normalizeCategoryId($project),
+                    'service_ids' => $this->normalizeServiceIds($project['services'] ?? ($project['service_ids'] ?? [])),
+                    'payment_type' => $this->normalizePaymentType($project['payment_type'] ?? ($project['paymentType'] ?? 'fixed_rate')),
+                    'hourly_hours' => $this->normalizeDecimalValue($project['hourly_hours'] ?? ($project['hours'] ?? null)),
+                    'discount_type' => $this->normalizeDiscountType($project['discount_type'] ?? ($project['discountType'] ?? null)),
+                    'discount_value' => $this->normalizeDecimalValue($project['discount_value'] ?? ($project['discountValue'] ?? null)),
+                    'discount_scope' => $this->normalizeDiscountScope($project['discount_scope'] ?? ($project['discountScope'] ?? null)),
                     'scope' => trim((string) ($project['scope'] ?? '')),
                     'estimate_type' => trim((string) ($project['estimateType'] ?? ($project['estimate_type'] ?? ''))),
                     'plans_url' => trim((string) ($project['plansUrl'] ?? ($project['plans_url'] ?? ''))),
@@ -209,9 +273,14 @@ class ProjectIntakeController extends BaseApiController
         $items[] = [
             'project_title' => $singleTitle,
             'project_description' => trim((string) ($data['project_description'] ?? '')),
-                'estimated_amount' => null,
-            'nature' => trim((string) ($data['nature'] ?? '')),
-            'trades' => $this->normalizeTrades($data['trades'] ?? []),
+            'estimated_amount' => $this->normalizeMoneyValue($data['estimated_amount'] ?? ($data['amount'] ?? null)),
+            'category_id' => $this->normalizeCategoryId($data),
+            'service_ids' => $this->normalizeServiceIds($data['services'] ?? ($data['service_ids'] ?? [])),
+            'payment_type' => $this->normalizePaymentType($data['payment_type'] ?? ($data['paymentType'] ?? 'fixed_rate')),
+            'hourly_hours' => $this->normalizeDecimalValue($data['hourly_hours'] ?? ($data['hours'] ?? null)),
+            'discount_type' => $this->normalizeDiscountType($data['discount_type'] ?? ($data['discountType'] ?? null)),
+            'discount_value' => $this->normalizeDecimalValue($data['discount_value'] ?? ($data['discountValue'] ?? null)),
+            'discount_scope' => $this->normalizeDiscountScope($data['discount_scope'] ?? ($data['discountScope'] ?? null)),
             'scope' => trim((string) ($data['scope'] ?? '')),
             'estimate_type' => trim((string) ($data['estimateType'] ?? ($data['estimate_type'] ?? ''))),
             'plans_url' => trim((string) ($data['plansUrl'] ?? ($data['plans_url'] ?? ''))),
@@ -293,7 +362,7 @@ class ProjectIntakeController extends BaseApiController
     }
 
     /**
-    * @param array<int, array{project_title:string,project_description:string,estimated_amount:?int,nature:string,trades:array<int,string>,scope:string,estimate_type:string,plans_url:string,zip_code:string,deadline:string,deadline_date:?string}> $projectItems
+     * @param array<int, array<string, mixed>> $projectItems
      * @return array<string, string>
      */
     private function validateProjectItems(array $projectItems): array
@@ -319,9 +388,97 @@ class ProjectIntakeController extends BaseApiController
             if ($item['deadline_date'] !== null && strtotime((string) $item['deadline_date']) === false) {
                 $errors['projects.' . $index . '.deadlineDate'] = 'Deadline date must be a valid date.';
             }
+
+            $billingErrors = $this->validateProjectBillingItem($item, $index);
+            foreach ($billingErrors as $field => $message) {
+                $errors[$field] = $message;
+            }
         }
 
         return $errors;
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @return array<string, string>
+     */
+    private function validateProjectBillingItem(array $item, int $index): array
+    {
+        $errors = [];
+
+        $paymentType = strtolower(trim((string) ($item['payment_type'] ?? 'fixed_rate')));
+        if (!in_array($paymentType, ['fixed_rate', 'hourly'], true)) {
+            $errors['projects.' . $index . '.payment_type'] = 'Payment type must be fixed_rate or hourly.';
+        }
+
+        $hours = $item['hourly_hours'] ?? null;
+        if ($paymentType === 'hourly') {
+            if (!is_numeric($hours) || (float) $hours <= 0) {
+                $errors['projects.' . $index . '.hourly_hours'] = 'Hourly payment requires a valid hours value greater than 0.';
+            }
+        } elseif ($hours !== null && $hours !== '' && !is_numeric($hours)) {
+            $errors['projects.' . $index . '.hourly_hours'] = 'Hours must be a valid number.';
+        }
+
+        $amount = $item['estimated_amount'] ?? null;
+        if ($amount !== null && $amount !== '' && (!is_numeric($amount) || (float) $amount < 0)) {
+            $errors['projects.' . $index . '.estimated_amount'] = 'Amount must be a valid number.';
+        }
+
+        $discountType = strtolower(trim((string) ($item['discount_type'] ?? '')));
+        if ($discountType !== '' && !in_array($discountType, ['fixed_amount', 'percentage'], true)) {
+            $errors['projects.' . $index . '.discount_type'] = 'Discount type must be fixed_amount or percentage.';
+        }
+
+        $discountValue = $item['discount_value'] ?? null;
+        if ($discountType !== '') {
+            if (!is_numeric($discountValue) || (float) $discountValue <= 0) {
+                $errors['projects.' . $index . '.discount_value'] = 'Discount value must be greater than 0 when a discount type is provided.';
+            }
+        } elseif ($discountValue !== null && $discountValue !== '' && !is_numeric($discountValue)) {
+            $errors['projects.' . $index . '.discount_value'] = 'Discount value must be numeric.';
+        }
+
+        $discountScope = trim((string) ($item['discount_scope'] ?? 'project_total'));
+        if ($discountScope !== '' && mb_strlen($discountScope) > 40) {
+            $errors['projects.' . $index . '.discount_scope'] = 'Discount scope must not exceed 40 characters.';
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param mixed $value
+     */
+    private function normalizeMoneyValue($value): ?string
+    {
+        return is_numeric($value) ? number_format((float) $value, 2, '.', '') : null;
+    }
+
+    /**
+     * @param mixed $value
+     */
+    private function normalizeDecimalValue($value): ?string
+    {
+        return is_numeric($value) ? number_format((float) $value, 2, '.', '') : null;
+    }
+
+    private function normalizePaymentType(mixed $value): string
+    {
+        $paymentType = strtolower(trim((string) $value));
+        return in_array($paymentType, ['fixed_rate', 'hourly'], true) ? $paymentType : 'fixed_rate';
+    }
+
+    private function normalizeDiscountType(mixed $value): ?string
+    {
+        $discountType = strtolower(trim((string) $value));
+        return in_array($discountType, ['fixed_amount', 'percentage'], true) ? $discountType : null;
+    }
+
+    private function normalizeDiscountScope(mixed $value): string
+    {
+        $discountScope = trim((string) $value);
+        return $discountScope !== '' ? $discountScope : 'project_total';
     }
 
     /**
@@ -450,81 +607,196 @@ class ProjectIntakeController extends BaseApiController
     }
 
     /**
-     * @param array<string, mixed> $projectData
-     * @param array<int, array<string, mixed>> $secureFiles
-     * @param array<string, mixed> $squareResult
+     * Send quotation-based notification to owner/admin with all projects
+     *
+     * @param int|null $quotationId
+     * @param array<int, array<string, mixed>> $projects
+     * @param array<int, array<int, array<string, mixed>>> $projectsByFile
+     * @param string $clientName
+     * @param string $clientEmail
+     * @param array<int, array<string, mixed>> $squareResults
      */
-    private function queueOwnerNotification(
-        int $projectId,
-        array $projectData,
+    private function queueOwnerNotificationForQuotation(
+        ?int $quotationId,
+        array $projects,
+        array $projectsByFile,
         string $clientName,
         string $clientEmail,
-        array $secureFiles,
-        array $squareResult
+        array $squareResults
     ): void
     {
         /** @var Square $squareConfig */
         $squareConfig = config('Square');
         $to = trim($squareConfig->ownerNotificationEmail);
-        if ($to === '') {
+        if ($to === '' || $quotationId === null) {
             return;
         }
 
-        $projectTitle = (string) ($projectData['project_title'] ?? '');
-        $projectDescription = (string) ($projectData['project_description'] ?? '');
+        $projectCount = count($projects);
+        $quotationModel = new QuotationModel();
+        $quotation = $quotationModel->find($quotationId);
 
+        $quotationNumber = '';
+        if (is_array($quotation)) {
+            $quotationNumber = (string) ($quotation['quote_number'] ?? '');
+        }
+
+        // Build quotation summary
         $contentParts = [
-            '<p>A new project was submitted from the website.</p>',
-            '<p><strong>Project ID:</strong> ' . esc((string) $projectId) . '</p>',
-            '<p><strong>Client:</strong> ' . esc($clientName) . ' (' . esc($clientEmail) . ')</p>',
-            '<p><strong>Title:</strong> ' . esc($projectTitle) . '</p>',
-            '<p><strong>Description:</strong><br>' . nl2br(esc($projectDescription)) . '</p>',
-            '<p><strong>Square Status:</strong> ' . esc((string) ($squareResult['status'] ?? 'skipped')) . '</p>',
+            '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">A new quotation with ' . esc((string) $projectCount) . ' project(s) was submitted from the website.</p>',
+            
+            // Quotation Header
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse;">',
+            '<tr><td style="padding:12px;background:#0f172a;"><strong style="color:#ffffff;">Quotation Details</strong></td></tr>',
+            '<tr><td style="padding:12px;">',
+            ($quotationNumber !== '' ? '<strong>Quote Number:</strong> ' . esc($quotationNumber) . '<br>' : ''),
+            '<strong>Quote ID:</strong> #' . esc((string) $quotationId) . '<br>',
+            '<strong>Total Projects:</strong> ' . esc((string) $projectCount) . '<br>',
+            '<strong>Submitted:</strong> ' . date('F j, Y \a\t g:i A') . '<br>',
+            '</td></tr>',
+            '</table>',
+
+            // Client Information
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse;">',
+            '<tr><td style="padding:12px;background:#f8fafc;border-left:3px solid #0f172a;"><strong style="color:#0f172a;">Client Information</strong></td></tr>',
+            '<tr><td style="padding:12px;">',
+            '<strong>Name:</strong> ' . esc($clientName) . '<br>',
+            '<strong>Email:</strong> ' . esc($clientEmail) . '<br>',
+            '</td></tr>',
+            '</table>',
         ];
 
-        if ($secureFiles !== []) {
-            $contentParts[] = '<p><strong>Files Uploaded:</strong> ' . count($secureFiles) . '</p>';
-            $links = array_map(static function (array $file): string {
-                $name = (string) ($file['original_name'] ?? 'File');
-                $url = (string) ($file['download_url'] ?? '');
-                if ($url === '') {
-                    return '';
-                }
-
-                return '<li>' . esc($name) . ': <a href="' . esc($url) . '">' . esc($url) . '</a></li>';
-            }, $secureFiles);
-
-            $links = array_values(array_filter($links));
-            if ($links !== []) {
-                $contentParts[] = '<p><strong>Secure File Links:</strong></p><ul>' . implode('', $links) . '</ul>';
+        // Build projects sections
+        foreach ($projects as $project) {
+            if (!is_array($project)) {
+                continue;
             }
 
-            $passwordRows = array_map(static function (array $file): string {
-                $name = (string) ($file['original_name'] ?? 'File');
-                $password = (string) ($file['password'] ?? '');
-                if ($password === '') {
-                    return '';
-                }
+            $projectId = (int) ($project['id'] ?? 0);
+            $projectTitle = (string) ($project['project_title'] ?? '');
+            $projectDescription = (string) ($project['project_description'] ?? '');
+            $projectCategory = (string) ($project['category'] ?? 'N/A');
+            $projectServices = $this->normalizeStringList($project['services'] ?? []);
+            $scope = (string) ($project['scope'] ?? '');
+            $estimateType = (string) ($project['estimate_type'] ?? '');
+            $plansUrl = (string) ($project['plans_url'] ?? '');
+            $zipCode = (string) ($project['zip_code'] ?? '');
+            $deadline = (string) ($project['deadline'] ?? '');
+            $deadlineDate = (string) ($project['deadline_date'] ?? '');
+            $estimatedAmount = (string) ($project['estimated_amount'] ?? '');
+            $paymentType = (string) ($project['payment_type'] ?? 'fixed_rate');
+            $hourlyHours = (string) ($project['hourly_hours'] ?? '');
+            $discountType = (string) ($project['discount_type'] ?? '');
+            $discountValue = (string) ($project['discount_value'] ?? '');
+            $discountScope = (string) ($project['discount_scope'] ?? 'project_total');
 
-                return '<li>' . esc($name) . ': ' . esc($password) . '</li>';
-            }, $secureFiles);
-            $passwordRows = array_values(array_filter($passwordRows));
-            if ($passwordRows !== []) {
-                $contentParts[] = '<p><strong>File Passwords:</strong></p><ul>' . implode('', $passwordRows) . '</ul>';
+            // Project card
+            $contentParts[] = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;">';
+            $contentParts[] = '<tr><td style="padding:12px;background:#0f172a;"><strong style="color:#ffffff;">Project #' . esc((string) $projectId) . ': ' . esc($projectTitle) . '</strong></td></tr>';
+            $contentParts[] = '<tr><td style="padding:12px;">';
+
+            // Project basic info
+            $contentParts[] = '<p style="margin:0 0 8px 0;"><strong>Category:</strong> ' . esc($projectCategory) . '</p>';
+            $contentParts[] = '<p style="margin:0 0 8px 0;"><strong>Services:</strong> ' . esc($projectServices === [] ? 'N/A' : implode(', ', $projectServices)) . '</p>';
+
+            // Description if available
+            if ($projectDescription !== '') {
+                $contentParts[] = '<p style="margin:8px 0;"><strong>Description:</strong></p>';
+                $contentParts[] = '<div style="margin:4px 0;padding:8px;background:#f8fafc;border-left:2px solid #0f172a;font-size:14px;">' . nl2br(esc($projectDescription)) . '</div>';
             }
+
+            // Project Details
+            if ($scope !== '' || $estimateType !== '' || $plansUrl !== '' || $zipCode !== '' || $deadline !== '' || $deadlineDate !== '') {
+                $contentParts[] = '<p style="margin:12px 0 8px 0;"><strong style="color:#0f172a;">Project Details</strong></p>';
+                if ($scope !== '') {
+                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Scope:</strong> ' . esc($scope) . '</p>';
+                }
+                if ($estimateType !== '') {
+                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Estimate Type:</strong> ' . esc($estimateType) . '</p>';
+                }
+                if ($plansUrl !== '') {
+                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Plans URL:</strong> <a href="' . esc($plansUrl) . '" style="color:#0f172a;text-decoration:none;">' . esc($plansUrl) . '</a></p>';
+                }
+                if ($zipCode !== '') {
+                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Zip Code:</strong> ' . esc($zipCode) . '</p>';
+                }
+                if ($deadline !== '') {
+                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Deadline:</strong> ' . esc($deadline) . '</p>';
+                }
+                if ($deadlineDate !== '') {
+                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Deadline Date:</strong> ' . esc($deadlineDate) . '</p>';
+                }
+            }
+
+            // Billing Information
+            $contentParts[] = '<p style="margin:12px 0 8px 0;"><strong style="color:#0f172a;">Billing Information</strong></p>';
+            $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Payment Type:</strong> ' . esc($paymentType === 'hourly' ? 'Hourly' : 'Fixed Rate') . '</p>';
+            if ($estimatedAmount !== '' && $estimatedAmount !== '0.00') {
+                $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Estimated Amount:</strong> $' . esc($estimatedAmount) . '</p>';
+            }
+            if ($paymentType === 'hourly' && $hourlyHours !== '' && $hourlyHours !== '0.00') {
+                $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Hours:</strong> ' . esc($hourlyHours) . '</p>';
+            }
+            if ($discountType !== '' && $discountValue !== '' && $discountValue !== '0.00') {
+                $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Discount:</strong> ' . esc(ucfirst(str_replace('_', ' ', $discountType))) . ' - ' . esc($discountValue) . ($discountType === 'percentage' ? '%' : '') . ' on ' . esc($discountScope) . '</p>';
+            }
+
+            // Project files if any
+            $projectFiles = $projectsByFile[$projectId] ?? [];
+            if ($projectFiles !== []) {
+                $contentParts[] = '<p style="margin:12px 0 8px 0;"><strong style="color:#0f172a;">Uploaded Files (' . count($projectFiles) . ')</strong></p>';
+                foreach ($projectFiles as $file) {
+                    $fileName = (string) ($file['original_name'] ?? 'File');
+                    $fileUrl = (string) ($file['download_url'] ?? '');
+                    $filePassword = (string) ($file['password'] ?? '');
+                    $fileSize = (int) ($file['size_kb'] ?? 0);
+
+                    if ($fileUrl === '') {
+                        continue;
+                    }
+
+                    $contentParts[] = '<div style="margin:8px 0;padding:8px;background:#f0f4f8;border-radius:4px;border-left:2px solid #0f172a;font-size:13px;">';
+                    $contentParts[] = '<p style="margin:0 0 4px 0;"><strong>' . esc($fileName) . '</strong> (' . esc((string) $fileSize) . ' KB)</p>';
+                    $contentParts[] = '<p style="margin:0 0 4px 0;"><a href="' . esc($fileUrl) . '" style="color:#0f172a;text-decoration:none;word-break:break-all;">Download</a></p>';
+                    if ($filePassword !== '') {
+                        $contentParts[] = '<p style="margin:0;"><strong>Pass:</strong> <code style="background:#ffffff;padding:2px 4px;border-radius:2px;font-family:monospace;border:1px solid #e5e7eb;">' . esc($filePassword) . '</code></p>';
+                    }
+                    $contentParts[] = '</div>';
+                }
+            }
+
+            $contentParts[] = '</td></tr>';
+            $contentParts[] = '</table>';
         }
+
+        // Square Status Summary
+        $squareStatuses = array_column($squareResults, 'status');
+        $queuedCount = count(array_filter($squareStatuses, static fn ($s) => $s === 'queued'));
+        $skippedCount = count(array_filter($squareStatuses, static fn ($s) => $s === 'skipped'));
+
+        $contentParts[] = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse;">';
+        $contentParts[] = '<tr><td style="padding:12px;background:#f8fafc;border-left:3px solid #0f172a;"><strong style="color:#0f172a;">Square Integration Status</strong></td></tr>';
+        $contentParts[] = '<tr><td style="padding:12px;">';
+        if ($queuedCount > 0) {
+            $contentParts[] = '<p style="margin:0 0 6px 0;"><strong>Queued for Processing:</strong> <span style="background:#d1fae5;padding:4px 8px;border-radius:4px;color:#065f46;">' . esc((string) $queuedCount) . ' project(s)</span></p>';
+        }
+        if ($skippedCount > 0) {
+            $contentParts[] = '<p style="margin:0;"><strong>Skipped:</strong> <span style="background:#fee2e2;padding:4px 8px;border-radius:4px;color:#7f1d1d;">' . esc((string) $skippedCount) . ' project(s)</span></p>';
+        }
+        $contentParts[] = '</td></tr>';
+        $contentParts[] = '</table>';
 
         $emailQueue = service('emailQueue');
         $body = $emailQueue->renderTemplate([
-            'subject' => 'New Project Submission #' . $projectId,
-            'recipientName' => 'Owner',
-            'headline' => 'New project requires review',
+            'subject' => 'New Quotation Submission - ' . ($quotationNumber !== '' ? $quotationNumber : '#' . $quotationId),
+            'recipientName' => 'Admin',
+            'headline' => 'New Quotation Submission Received',
             'contentHtml' => implode('', $contentParts),
-            'actionText' => 'Open Square Dashboard',
-            'actionUrl' => 'https://squareup.com/dashboard',
+            'actionText' => 'Review in Dashboard',
+            'actionUrl' => base_url('dashboard/quotations/' . $quotationId),
         ]);
 
-        queue_email_job($to, 'New Project Submission #' . $projectId, $body, [
+        queue_email_job($to, 'New Quotation Submission - ' . ($quotationNumber !== '' ? $quotationNumber : '#' . $quotationId), $body, [
             'mail_type' => 'html',
         ]);
     }
@@ -535,6 +807,7 @@ class ProjectIntakeController extends BaseApiController
     private function queueCustomerSubmittedNotification(
         string $email,
         string $name,
+        ?int $quotationId,
         array $projects,
         array $secureFiles
     ): void
@@ -545,55 +818,107 @@ class ProjectIntakeController extends BaseApiController
         }
 
         $projectCount = count($projects);
-        $projectIds = array_map(static function ($project): string {
-            return (string) ($project['id'] ?? '');
-        }, $projects);
+        $recipientName = $name === '' ? 'Customer' : $name;
+        $quotationNumber = '';
 
-        $emailQueue = service('emailQueue');
-        $subject = 'Project submission received';
-
-        $fileLinksHtml = '';
-        if ($secureFiles !== []) {
-            $links = array_map(static function (array $file): string {
-                $name = (string) ($file['original_name'] ?? 'File');
-                $url = (string) ($file['download_url'] ?? '');
-                if ($url === '') {
-                    return '';
-                }
-
-                return '<li>' . esc($name) . ': <a href="' . esc($url) . '">' . esc($url) . '</a></li>';
-            }, $secureFiles);
-
-            $links = array_values(array_filter($links));
-            if ($links !== []) {
-                $fileLinksHtml .= '<p><strong>Your Secure File Links:</strong></p><ul>' . implode('', $links) . '</ul>';
-            }
-
-            $passwordRows = array_map(static function (array $file): string {
-                $name = (string) ($file['original_name'] ?? 'File');
-                $password = (string) ($file['password'] ?? '');
-                if ($password === '') {
-                    return '';
-                }
-
-                return '<li>' . esc($name) . ': ' . esc($password) . '</li>';
-            }, $secureFiles);
-            $passwordRows = array_values(array_filter($passwordRows));
-            if ($passwordRows !== []) {
-                $fileLinksHtml .= '<p><strong>File Passwords:</strong></p><ul>' . implode('', $passwordRows) . '</ul>';
+        if ($quotationId !== null) {
+            $quotation = (new QuotationModel())->find($quotationId);
+            if (is_array($quotation)) {
+                $quotationNumber = trim((string) ($quotation['quote_number'] ?? ''));
             }
         }
 
+        // Build comprehensive project details for customer
+        $projectsHtml = '';
+        foreach ($projects as $index => $project) {
+            if (!is_array($project)) {
+                continue;
+            }
+
+            $projectId = (int) ($project['id'] ?? 0);
+            $projectTitle = (string) ($project['project_title'] ?? '');
+            $category = (string) ($project['category'] ?? 'N/A');
+            $services = $this->normalizeStringList($project['services'] ?? []);
+            $paymentType = (string) ($project['payment_type'] ?? 'fixed_rate');
+            $estimatedAmount = (string) ($project['estimated_amount'] ?? '');
+            $hourlyHours = (string) ($project['hourly_hours'] ?? '');
+            $discountType = (string) ($project['discount_type'] ?? '');
+            $discountValue = (string) ($project['discount_value'] ?? '');
+            $deadline = (string) ($project['deadline_date'] ?? '');
+
+            $projectsHtml .= '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:16px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;">';
+            $projectsHtml .= '<tr><td style="padding:12px;background:#0f172a;"><strong style="color:#ffffff;">Project #' . esc((string) $projectId) . ': ' . esc($projectTitle) . '</strong></td></tr>';
+            $projectsHtml .= '<tr><td style="padding:12px;">';
+            
+            // Category and Services
+            $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Category:</strong> ' . esc($category) . '</p>';
+            $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Services:</strong> ' . esc($services === [] ? 'N/A' : implode(', ', $services)) . '</p>';
+            
+            // Billing Info
+            $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Payment Type:</strong> ' . esc($paymentType === 'hourly' ? 'Hourly' : 'Fixed Rate') . '</p>';
+            if ($estimatedAmount !== '' && $estimatedAmount !== '0.00') {
+                $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Estimated Amount:</strong> $' . esc($estimatedAmount) . '</p>';
+            }
+            if ($paymentType === 'hourly' && $hourlyHours !== '' && $hourlyHours !== '0.00') {
+                $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Hours:</strong> ' . esc($hourlyHours) . '</p>';
+            }
+            if ($discountType !== '' && $discountValue !== '' && $discountValue !== '0.00') {
+                $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Discount:</strong> ' . esc(ucfirst(str_replace('_', ' ', $discountType))) . ' - ' . esc($discountValue) . ($discountType === 'percentage' ? '%' : '') . '</p>';
+            }
+            if ($deadline !== '') {
+                $projectsHtml .= '<p style="margin:0;"><strong>Deadline:</strong> ' . esc($deadline) . '</p>';
+            }
+            
+            $projectsHtml .= '</td></tr>';
+            $projectsHtml .= '</table>';
+        }
+
+        $fileLinksHtml = '';
+        if ($secureFiles !== []) {
+            $fileLinksHtml .= '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse;">';
+            $fileLinksHtml .= '<tr><td style="padding:12px;background:#f8fafc;border-left:3px solid #0f172a;"><strong style="color:#0f172a;">Your Uploaded Files</strong></td></tr>';
+            $fileLinksHtml .= '<tr><td style="padding:12px;">';
+            $fileLinksHtml .= '<p style="margin:0 0 12px 0;font-size:14px;color:#6b7280;">Download your files using the links and passwords provided below.</p>';
+            
+            foreach ($secureFiles as $file) {
+                $name = (string) ($file['original_name'] ?? 'File');
+                $url = (string) ($file['download_url'] ?? '');
+                $password = (string) ($file['password'] ?? '');
+                
+                if ($url === '') {
+                    continue;
+                }
+
+                $fileLinksHtml .= '<div style="margin:12px 0;padding:10px;background:#f0f4f8;border-radius:6px;border-left:2px solid #0f172a;">';
+                $fileLinksHtml .= '<p style="margin:0 0 6px 0;"><strong>' . esc($name) . '</strong></p>';
+                $fileLinksHtml .= '<p style="margin:0 0 6px 0;"><a href="' . esc($url) . '" style="color:#0f172a;text-decoration:none;word-break:break-all;">' . esc($url) . '</a></p>';
+                if ($password !== '') {
+                    $fileLinksHtml .= '<p style="margin:0;font-size:13px;"><strong>Password:</strong> <code style="background:#ffffff;padding:4px 6px;border-radius:3px;font-family:monospace;border:1px solid #e5e7eb;">' . esc($password) . '</code></p>';
+                }
+                $fileLinksHtml .= '</div>';
+            }
+
+            $fileLinksHtml .= '</td></tr>';
+            $fileLinksHtml .= '</table>';
+        }
+
+        $contentHtml = '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">Thank you for submitting your quotation request. We have received it and our team is reviewing your projects.</p>'
+            . ($quotationId !== null ? '<p style="margin:14px 0 6px 0;font-size:15px;line-height:1.6;"><strong>Quotation ID:</strong> #' . esc((string) $quotationId) . '</p>' : '')
+            . ($quotationNumber !== '' ? '<p style="margin:6px 0 14px 0;font-size:15px;line-height:1.6;"><strong>Quote Number:</strong> ' . esc($quotationNumber) . '</p>' : '')
+            . '<p style="margin:14px 0;font-size:15px;line-height:1.6;"><strong>Total Projects Submitted:</strong> ' . esc((string) $projectCount) . '</p>'
+            . '<div style="margin:20px 0;">' . $projectsHtml . '</div>'
+            . $fileLinksHtml
+            . '<p style="margin:20px 0 0 0;font-size:14px;color:#6b7280;line-height:1.6;">You will receive updates as we process your request. If you have any questions, please don\'t hesitate to reach out to us.</p>';
+
+        $emailQueue = service('emailQueue');
+        $subject = 'Quotation submission received' . ($quotationNumber !== '' ? ' - ' . $quotationNumber : ($quotationId !== null ? ' #' . $quotationId : ''));
         $body = $emailQueue->renderTemplate([
             'subject' => $subject,
-            'recipientName' => $name === '' ? 'Customer' : $name,
-            'headline' => 'We received your project request',
-            'contentHtml' => '<p>Thanks for your submission. Your project request is now in our queue.</p>'
-                . '<p><strong>Projects Submitted:</strong> ' . esc((string) $projectCount) . '</p>'
-                . '<p><strong>Project IDs:</strong> ' . esc(implode(', ', array_filter($projectIds))) . '</p>'
-                . $fileLinksHtml,
-            'actionText' => 'View Square Dashboard',
-            'actionUrl' => 'https://squareup.com/dashboard',
+            'recipientName' => $recipientName,
+            'headline' => 'We received your quotation request',
+            'contentHtml' => $contentHtml,
+            'actionText' => 'View Your Quotation',
+            'actionUrl' => $quotationId !== null ? base_url('customer/quotations/' . $quotationId) : base_url('customer/projects'),
         ]);
 
         queue_email_job($to, $subject, $body, ['mail_type' => 'html']);
@@ -692,6 +1017,67 @@ class ProjectIntakeController extends BaseApiController
     }
 
     /**
+     * @param array<int, array<string, mixed>> $projects
+     * @return array<int, array<string, mixed>>
+     */
+    private function formatProjectsForResponse(array $projects): array
+    {
+        if ($projects === []) {
+            return [];
+        }
+
+        $projectIds = array_map(static fn (array $project): int => (int) ($project['id'] ?? 0), $projects);
+        $projectIds = array_values(array_filter($projectIds, static fn (int $id): bool => $id > 0));
+
+        $categoryIds = array_map(static fn (array $project): int => (int) ($project['category_id'] ?? 0), $projects);
+        $categoryIds = array_values(array_unique(array_filter($categoryIds, static fn (int $id): bool => $id > 0)));
+
+        $categoriesById = [];
+        if ($categoryIds !== []) {
+            $categoryRows = model(CategoryModel::class)->whereIn('id', $categoryIds)->findAll();
+            foreach ($categoryRows as $category) {
+                if (!is_array($category)) {
+                    continue;
+                }
+
+                $categoryId = (int) ($category['id'] ?? 0);
+                if ($categoryId > 0) {
+                    $categoriesById[$categoryId] = trim((string) ($category['name'] ?? ''));
+                }
+            }
+        }
+
+        $projectServiceModel = new ProjectServiceModel();
+        $servicesByProject = $projectServiceModel->getServiceNamesByProjectIds($projectIds);
+        $serviceIdsByProject = $projectServiceModel->getServiceIdsByProjectIds($projectIds);
+
+        foreach ($projects as &$project) {
+            if (!is_array($project)) {
+                continue;
+            }
+
+            $projectId = (int) ($project['id'] ?? 0);
+            $categoryId = (int) ($project['category_id'] ?? 0);
+
+            $category = $categoriesById[$categoryId] ?? '';
+            $services = $servicesByProject[$projectId] ?? [];
+            $serviceIds = $serviceIdsByProject[$projectId] ?? [];
+
+            $project['category'] = $category;
+            $project['services'] = $services;
+            $project['service_ids'] = $serviceIds;
+            $project['payment_type'] = (string) ($project['payment_type'] ?? 'fixed_rate');
+            $project['hourly_hours'] = $project['hourly_hours'] ?? null;
+            $project['discount_type'] = $project['discount_type'] ?? null;
+            $project['discount_value'] = $project['discount_value'] ?? null;
+            $project['discount_scope'] = (string) ($project['discount_scope'] ?? 'project_total');
+        }
+        unset($project);
+
+        return $projects;
+    }
+
+    /**
      * @param mixed $value
      */
     private function normalizeDateString($value): ?string
@@ -738,24 +1124,33 @@ class ProjectIntakeController extends BaseApiController
     }
 
     /**
-     * @param mixed $trades
+     * @param mixed $items
      * @return array<int, string>
      */
-    private function normalizeTrades($trades): array
+    private function normalizeStringList($items): array
     {
-        if (!is_array($trades)) {
-            return [];
-        }
-
-        $items = [];
-        foreach ($trades as $trade) {
-            $value = trim((string) $trade);
-            if ($value !== '') {
-                $items[] = $value;
+        if (is_string($items)) {
+            $decoded = json_decode($items, true);
+            if (is_array($decoded)) {
+                $items = $decoded;
+            } else {
+                $items = preg_split('/\s*,\s*/', $items) ?: [];
             }
         }
 
-        return array_values(array_unique($items));
+        if (!is_array($items)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($items as $item) {
+            $value = trim((string) $item);
+            if ($value !== '') {
+                $normalized[] = $value;
+            }
+        }
+
+        return array_values(array_unique($normalized));
     }
 
     /**
@@ -766,11 +1161,6 @@ class ProjectIntakeController extends BaseApiController
         $title = trim((string) ($project['project_title'] ?? ''));
         if ($title !== '') {
             return $title;
-        }
-
-        $nature = trim((string) ($project['nature'] ?? ''));
-        if ($nature !== '') {
-            return $nature;
         }
 
         $scope = trim((string) ($project['scope'] ?? ''));
@@ -794,9 +1184,196 @@ class ProjectIntakeController extends BaseApiController
      */
     private function looksLikeProjectPayload(array $item): bool
     {
-        return isset($item['nature'])
-            || isset($item['trades'])
+        return isset($item['category'])
+            || isset($item['category_id'])
+            || isset($item['services'])
+            || isset($item['service_ids'])
             || isset($item['scope'])
             || isset($item['project_title']);
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     */
+    private function normalizeCategoryId(array $item): int
+    {
+        if (isset($item['category_id'])) {
+            $id = (int) $item['category_id'];
+            if ($id > 0) {
+                return $id;
+            }
+        }
+
+        if (isset($item['category']) && is_numeric($item['category'])) {
+            $id = (int) $item['category'];
+            if ($id > 0) {
+                return $id;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * @param mixed $value
+     * @return array<int, int>
+     */
+    private function normalizeServiceIds($value): array
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            if (is_array($decoded)) {
+                $value = $decoded;
+            } else {
+                $value = preg_split('/\s*,\s*/', $value) ?: [];
+            }
+        }
+
+        if (!is_array($value)) {
+            return [];
+        }
+
+        $ids = array_map('intval', $value);
+        $ids = array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
+
+        return $ids;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $projectItems
+     * @return array{projects:array<int, array<string, mixed>>,errors:array<string, string>}
+     */
+    private function resolveProjectTaxonomy(array $projectItems): array
+    {
+        $categoryModel = new CategoryModel();
+        $serviceModel = new ServiceModel();
+
+        $categories = $categoryModel->findAll();
+        $categoryById = [];
+        $categoryBySlug = [];
+        $categoryByName = [];
+
+        foreach ($categories as $category) {
+            if (!is_array($category)) {
+                continue;
+            }
+
+            $id = (int) ($category['id'] ?? 0);
+            if ($id < 1) {
+                continue;
+            }
+
+            $categoryById[$id] = $category;
+
+            $slug = strtolower(trim((string) ($category['slug'] ?? '')));
+            if ($slug !== '') {
+                $categoryBySlug[$slug] = $category;
+            }
+
+            $name = strtolower(trim((string) ($category['name'] ?? '')));
+            if ($name !== '') {
+                $categoryByName[$name] = $category;
+            }
+        }
+
+        $services = $serviceModel->withCategories();
+        $serviceById = [];
+        $serviceBySlug = [];
+        $serviceByName = [];
+
+        foreach ($services as $service) {
+            if (!is_array($service)) {
+                continue;
+            }
+
+            $id = (int) ($service['id'] ?? 0);
+            if ($id < 1) {
+                continue;
+            }
+
+            $serviceById[$id] = $service;
+
+            $slug = strtolower(trim((string) ($service['slug'] ?? '')));
+            if ($slug !== '') {
+                $serviceBySlug[$slug] = $service;
+            }
+
+            $name = strtolower(trim((string) ($service['name'] ?? '')));
+            if ($name !== '') {
+                $serviceByName[$name] = $service;
+            }
+        }
+
+        $errors = [];
+        $resolved = [];
+
+        foreach ($projectItems as $index => $item) {
+            $categoryId = (int) ($item['category_id'] ?? 0);
+            if ($categoryId < 1) {
+                $errors['projects.' . $index . '.category'] = 'Category is required for each project.';
+                continue;
+            }
+
+            $category = $categoryById[$categoryId] ?? null;
+
+            if (!is_array($category)) {
+                $errors['projects.' . $index . '.category'] = 'Category was not found.';
+                continue;
+            }
+
+            $rawServices = $this->normalizeServiceIds($item['service_ids'] ?? []);
+            if ($rawServices === []) {
+                $errors['projects.' . $index . '.services'] = 'At least one service is required for each project.';
+                continue;
+            }
+
+            $serviceIds = [];
+            $serviceNames = [];
+            $invalid = [];
+
+            foreach ($rawServices as $rawService) {
+                $service = null;
+
+                $service = $serviceById[(int) $rawService] ?? null;
+
+                if (!is_array($service)) {
+                    $invalid[] = (string) $rawService;
+                    continue;
+                }
+
+                $serviceCategoryIds = array_map(
+                    static fn (array $categoryRow): int => (int) ($categoryRow['id'] ?? 0),
+                    is_array($service['categories'] ?? null) ? $service['categories'] : []
+                );
+
+                if (!in_array($categoryId, $serviceCategoryIds, true)) {
+                    $invalid[] = (string) $rawService;
+                    continue;
+                }
+
+                $serviceIds[] = (int) ($service['id'] ?? 0);
+                $serviceName = trim((string) ($service['name'] ?? ''));
+                if ($serviceName !== '') {
+                    $serviceNames[] = $serviceName;
+                }
+            }
+
+            if ($invalid !== []) {
+                $errors['projects.' . $index . '.services'] = 'Invalid service(s) for selected category: ' . implode(', ', $invalid);
+                continue;
+            }
+
+            $item['category'] = trim((string) ($category['name'] ?? ''));
+            $item['services'] = array_values(array_unique($serviceNames));
+            $item['category_id'] = $categoryId;
+            $item['service_ids'] = array_values(array_unique(array_filter($serviceIds, static fn (int $id): bool => $id > 0)));
+
+            $resolved[] = $item;
+        }
+
+        return [
+            'projects' => $errors === [] ? $resolved : $projectItems,
+            'errors' => $errors,
+        ];
     }
 }

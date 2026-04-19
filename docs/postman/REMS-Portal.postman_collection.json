@@ -1,9 +1,19 @@
 {
   "info": {
-    "_postman_id": "rems-portal-postman-collection",
-    "name": "REMS Portal Project",
-    "description": "Postman collection for REMS Portal authentication and project intake endpoints.",
+    "_postman_id": "5a5f9f2d-29d2-4fd0-bd58-2f8f8ef09c80",
+    "name": "REMS Portal API",
+    "description": "Complete Postman collection mapped from CodeIgniter routes.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
   },
   "item": [
     {
@@ -12,6 +22,9 @@
         {
           "name": "Register",
           "request": {
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
               {
@@ -21,7 +34,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"SecurePassword123!\",\n  \"name\": \"John Doe\",\n  \"phone\": \"+14155552671\",\n  \"company\": \"Acme Corp\"\n}"
+              "raw": "{\n  \"name\": \"{{register_name}}\",\n  \"email\": \"{{register_email}}\",\n  \"password\": \"{{register_password}}\",\n  \"phone\": \"{{register_phone}}\",\n  \"company\": \"{{register_company}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/register",
@@ -38,7 +51,43 @@
         },
         {
           "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {};",
+                  "try {",
+                  "  json = pm.response.json();",
+                  "} catch (e) {}",
+                  "",
+                  "const directAccess = json.access_token || json.accessToken || null;",
+                  "const directRefresh = json.refresh_token || json.refreshToken || null;",
+                  "const dataAccess = json.data && (json.data.access_token || json.data.accessToken || (json.data.tokens && (json.data.tokens.access_token || json.data.tokens.accessToken)));",
+                  "const dataRefresh = json.data && (json.data.refresh_token || json.data.refreshToken || (json.data.tokens && (json.data.tokens.refresh_token || json.data.tokens.refreshToken)));",
+                  "",
+                  "const accessToken = directAccess || dataAccess || '';",
+                  "const refreshToken = directRefresh || dataRefresh || '';",
+                  "",
+                  "if (accessToken) {",
+                  "  pm.collectionVariables.set('access_token', accessToken);",
+                  "}",
+                  "if (refreshToken) {",
+                  "  pm.collectionVariables.set('refresh_token', refreshToken);",
+                  "}",
+                  "",
+                  "pm.test('Login returned access token', function () {",
+                  "  pm.expect(accessToken).to.not.eql('');",
+                  "});"
+                ]
+              }
+            }
+          ],
           "request": {
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
               {
@@ -48,7 +97,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"SecurePassword123!\"\n}"
+              "raw": "{\n  \"email\": \"{{login_email}}\",\n  \"password\": \"{{login_password}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/login",
@@ -64,56 +113,11 @@
           }
         },
         {
-          "name": "Get Current User",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/me",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "me"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Refresh Token",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{refresh_token}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/refresh",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "refresh"
-              ]
-            }
-          }
-        },
-        {
           "name": "Forgot Password",
           "request": {
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
               {
@@ -123,7 +127,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"user@example.com\"\n}"
+              "raw": "{\n  \"email\": \"{{login_email}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/forgot-password",
@@ -141,6 +145,9 @@
         {
           "name": "Reset Password",
           "request": {
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
               {
@@ -150,7 +157,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"token\": \"{{reset_token}}\",\n  \"password\": \"NewPassword123!\"\n}"
+              "raw": "{\n  \"token\": \"{{reset_token}}\",\n  \"password\": \"{{new_password}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/reset-password",
@@ -166,6 +173,40 @@
           }
         },
         {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
+            }
+          }
+        },
+        {
           "name": "Change Password",
           "request": {
             "method": "POST",
@@ -173,16 +214,11 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}",
-                "type": "text"
               }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"current_password\": \"SecurePassword123!\",\n  \"password\": \"NewPassword456!\"\n}"
+              "raw": "{\n  \"current_password\": \"{{login_password}}\",\n  \"password\": \"{{new_password}}\"\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/auth/change-password",
@@ -201,13 +237,6 @@
           "name": "Logout",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}",
-                "type": "text"
-              }
-            ],
             "url": {
               "raw": "{{baseUrl}}/api/auth/logout",
               "host": [
@@ -227,165 +256,18 @@
       "name": "Project Intake",
       "item": [
         {
-          "name": "Submit - Form Data (2 Projects, Own Files)",
+          "name": "Submit Projects",
           "request": {
             "method": "POST",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}",
-                "type": "text"
+                "key": "Content-Type",
+                "value": "application/json"
               }
             ],
             "body": {
-              "mode": "formdata",
-              "formdata": [
-                {
-                  "key": "name",
-                  "value": "Customer Name",
-                  "type": "text"
-                },
-                {
-                  "key": "email",
-                  "value": "example@gmail.com",
-                  "type": "text"
-                },
-                {
-                  "key": "company",
-                  "value": "Acme",
-                  "type": "text"
-                },
-                {
-                  "key": "phone",
-                  "value": "+14155552671",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][nature]",
-                  "value": "Full Build",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][scope]",
-                  "value": "New 5-story office building",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][estimateType]",
-                  "value": "complete",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][plansUrl]",
-                  "value": "https://dropbox.com/...",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][zipCode]",
-                  "value": "90210",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][deadline]",
-                  "value": "standard",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][deadlineDate]",
-                  "value": "2026-05-01",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][estimated_amount]",
-                  "value": "150000",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][trades][]",
-                  "value": "Site Work Takeoff & Estimating",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][trades][]",
-                  "value": "Concrete Takeoff & Estimating",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][project_title]",
-                  "value": "Warehouse Retrofit",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][project_description]",
-                  "value": "Retrofit HVAC and concrete patching",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][nature]",
-                  "value": "Renovation",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][scope]",
-                  "value": "Warehouse retrofit project",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][estimateType]",
-                  "value": "partial",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][plansUrl]",
-                  "value": "https://dropbox.com/...",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][zipCode]",
-                  "value": "10001",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][deadline]",
-                  "value": "rush",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][deadlineDate]",
-                  "value": "2026-05-10",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][estimated_amount]",
-                  "value": "85000",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[1][trades][]",
-                  "value": "Concrete Takeoff & Estimating",
-                  "type": "text"
-                },
-                {
-                  "key": "projects[0][files][]",
-                  "type": "file",
-                  "src": "{{filePath1}}"
-                },
-                {
-                  "key": "projects[0][files][]",
-                  "type": "file",
-                  "src": "{{filePath2}}"
-                },
-                {
-                  "key": "projects[1][files][]",
-                  "type": "file",
-                  "src": "{{filePath3}}"
-                },
-                {
-                  "key": "projects[1][files][]",
-                  "type": "file",
-                  "src": "{{filePath4}}"
-                }
-              ]
+              "mode": "raw",
+              "raw": "{\n  \"client_name\": \"{{client_name}}\",\n  \"client_email\": \"{{client_email}}\",\n  \"client_phone\": \"{{client_phone}}\",\n  \"company\": \"{{client_company}}\",\n  \"projects\": [\n    {\n      \"project_title\": \"Sample Project A\",\n      \"project_description\": \"Interior scope for first floor\",\n      \"category_id\": {{category_id}},\n      \"service_ids\": [{{service_id_1}}, {{service_id_2}}],\n      \"estimated_amount\": 25000,\n      \"payment_type\": \"fixed_rate\",\n      \"discount_type\": \"percentage\",\n      \"discount_value\": 5,\n      \"discount_scope\": \"project_total\",\n      \"scope\": \"Fit-out\",\n      \"estimate_type\": \"complete\",\n      \"zip_code\": \"90210\",\n      \"deadline\": \"standard\",\n      \"deadline_date\": \"2026-05-15\"\n    }\n  ]\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/projects/submit",
@@ -403,12 +285,14 @@
         {
           "name": "Download Secure File",
           "request": {
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "header": [
               {
                 "key": "X-File-Password",
-                "value": "1234",
-                "type": "text"
+                "value": "{{file_password}}"
               }
             ],
             "url": {
@@ -426,12 +310,425 @@
           }
         }
       ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "List Categories",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Category",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/{{category_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories",
+                "{{category_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Category (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"General Construction\",\n  \"slug\": \"general-construction\",\n  \"description\": \"General project category\",\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Category PUT (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated category description\",\n  \"sort_order\": 2\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/{{category_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories",
+                "{{category_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Category PATCH (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/{{category_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories",
+                "{{category_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Category (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/categories/{{category_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories",
+                "{{category_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Services",
+      "item": [
+        {
+          "name": "List Services",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/services",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "services"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Service",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "services",
+                "{{service_id_1}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Services By Category",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/services/category/{{category_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "services",
+                "category",
+                "{{category_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Service (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Concrete Work\",\n  \"slug\": \"concrete-work\",\n  \"description\": \"Concrete takeoff and estimating\",\n  \"category_ids\": [{{category_id}}],\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/services",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "services"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Service PUT (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated service description\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "services",
+                "{{service_id_1}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Service PATCH (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "services",
+                "{{service_id_1}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Service (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "services",
+                "{{service_id_1}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Quotations",
+      "item": [
+        {
+          "name": "List Quotations (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Quotation (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": {{customer_id}},\n  \"title\": \"Sample Quotation\",\n  \"status\": \"submitted\",\n  \"notes\": \"Initial quotation draft\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Submit Quotation With Projects (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_name\": \"{{client_name}}\",\n  \"client_email\": \"{{client_email}}\",\n  \"client_phone\": \"{{client_phone}}\",\n  \"company\": \"{{client_company}}\",\n  \"projects\": [\n    {\n      \"project_title\": \"Quotation Project A\",\n      \"project_description\": \"Scope for quotation\",\n      \"category_id\": {{category_id}},\n      \"service_ids\": [{{service_id_1}}, {{service_id_2}}],\n      \"estimated_amount\": 18000,\n      \"payment_type\": \"fixed_rate\",\n      \"discount_type\": \"fixed_amount\",\n      \"discount_value\": 500,\n      \"discount_scope\": \"project_total\",\n      \"scope\": \"Interior work\",\n      \"estimate_type\": \"complete\",\n      \"zip_code\": \"10001\",\n      \"deadline\": \"standard\",\n      \"deadline_date\": \"2026-05-30\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations",
+                "submit"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Quotation (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations",
+                "{{quotation_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Customer Quotations (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/customers/{{customer_id}}/quotations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customer_id}}",
+                "quotations"
+              ]
+            }
+          }
+        }
+      ]
     }
   ],
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost/rems-portal/public"
+      "value": "http://localhost/rems-portal/public",
+      "type": "string"
     },
     {
       "key": "access_token",
@@ -444,8 +741,93 @@
       "type": "string"
     },
     {
+      "key": "login_email",
+      "value": "admin@example.com",
+      "type": "string"
+    },
+    {
+      "key": "login_password",
+      "value": "SecurePassword123!",
+      "type": "string"
+    },
+    {
+      "key": "register_name",
+      "value": "Admin User",
+      "type": "string"
+    },
+    {
+      "key": "register_email",
+      "value": "admin@example.com",
+      "type": "string"
+    },
+    {
+      "key": "register_password",
+      "value": "SecurePassword123!",
+      "type": "string"
+    },
+    {
+      "key": "register_phone",
+      "value": "+14155552671",
+      "type": "string"
+    },
+    {
+      "key": "register_company",
+      "value": "REMS Portal",
+      "type": "string"
+    },
+    {
+      "key": "new_password",
+      "value": "NewSecurePassword456!",
+      "type": "string"
+    },
+    {
       "key": "reset_token",
       "value": "",
+      "type": "string"
+    },
+    {
+      "key": "client_name",
+      "value": "Client Example",
+      "type": "string"
+    },
+    {
+      "key": "client_email",
+      "value": "client@example.com",
+      "type": "string"
+    },
+    {
+      "key": "client_phone",
+      "value": "+14155550000",
+      "type": "string"
+    },
+    {
+      "key": "client_company",
+      "value": "Client Company LLC",
+      "type": "string"
+    },
+    {
+      "key": "customer_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "quotation_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "category_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "service_id_1",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "service_id_2",
+      "value": "2",
       "type": "string"
     },
     {
@@ -454,20 +836,9 @@
       "type": "string"
     },
     {
-      "key": "filePath1",
-      "value": "C:/path/to/plan-1.pdf"
-    },
-    {
-      "key": "filePath2",
-      "value": "C:/path/to/plan-2.pdf"
-    },
-    {
-      "key": "filePath3",
-      "value": "C:/path/to/plan-3.pdf"
-    },
-    {
-      "key": "filePath4",
-      "value": "C:/path/to/plan-4.pdf"
+      "key": "file_password",
+      "value": "1234",
+      "type": "string"
     }
   ]
 }

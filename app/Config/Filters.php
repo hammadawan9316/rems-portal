@@ -14,6 +14,7 @@ use CodeIgniter\Filters\PerformanceMetrics;
 use CodeIgniter\Filters\SecureHeaders;
 use App\Middleware\JwtAuthMiddleware;
 use App\Middleware\RoleBasedAccessMiddleware;
+use App\Filters\CorsFilter;
 
 class Filters extends BaseFilters
 {
@@ -38,6 +39,7 @@ class Filters extends BaseFilters
         'performance'   => PerformanceMetrics::class,
         'jwtAuth'       => JwtAuthMiddleware::class,
         'roleAccess'    => RoleBasedAccessMiddleware::class,
+        'cors'          => CorsFilter::class,
     ];
 
     /**
@@ -76,11 +78,13 @@ class Filters extends BaseFilters
      */
     public array $globals = [
         'before' => [
+            'cors',
             // 'honeypot',
             // 'csrf',
             // 'invalidchars',
         ],
         'after' => [
+            'cors',
             // 'honeypot',
             // 'secureheaders',
         ],
@@ -110,7 +114,5 @@ class Filters extends BaseFilters
      *
      * @var array<string, array<string, list<string>>>
      */
-    public array $filters = [
-        'cors' => ['before' => ['api/*']],
-    ];
+    public array $filters = [];
 }

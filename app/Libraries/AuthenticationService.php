@@ -107,16 +107,16 @@ class AuthenticationService
         if (!is_array($user)) {
             return [
                 'success' => false,
-                'message' => 'Invalid email or password',
-                'errors' => ['auth' => 'Invalid credentials'],
+                'message' => 'Email not found',
+                'errors' => ['email' => 'Email not found'],
             ];
         }
 
         if (!password_verify($password, $user['password_hash'])) {
             return [
                 'success' => false,
-                'message' => 'Invalid email or password',
-                'errors' => ['auth' => 'Invalid credentials'],
+                'message' => 'Password is not correct',
+                'errors' => ['password' => 'Password is not correct'],
             ];
         }
 

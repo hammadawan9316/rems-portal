@@ -11,6 +11,49 @@ use CodeIgniter\Config\BaseConfig;
  */
 class Cors extends BaseConfig
 {
+    public function __construct()
+    {
+        parent::__construct();
+
+        $allowedOrigins = $this->parseListEnv('CORS_ALLOWED_ORIGINS');
+        $allowedHeaders = $this->parseListEnv('CORS_ALLOWED_HEADERS');
+        $allowedMethods = $this->parseListEnv('CORS_ALLOWED_METHODS');
+
+        if ($allowedOrigins !== []) {
+            $this->default['allowedOrigins'] = $allowedOrigins;
+        }
+
+        if ($allowedHeaders !== []) {
+            $this->default['allowedHeaders'] = $allowedHeaders;
+        }
+
+        if ($allowedMethods !== []) {
+            $this->default['allowedMethods'] = $allowedMethods;
+        }
+
+        $this->default['supportsCredentials'] = (bool) env('CORS_SUPPORTS_CREDENTIALS', false);
+        $this->default['maxAge'] = (int) env('CORS_MAX_AGE', $this->default['maxAge']);
+    }
+
+    /**
+     * Parse comma-separated values from environment variables.
+     *
+     * @return list<string>
+     */
+    private function parseListEnv(string $key): array
+    {
+        $value = env($key);
+
+        if (! is_string($value) || trim($value) === '') {
+            return [];
+        }
+
+        $items = array_map('trim', explode(',', $value));
+        $items = array_filter($items, static fn (string $item): bool => $item !== '');
+
+        return array_values($items);
+    }
+
     /**
      * The default CORS configuration.
      *
@@ -68,7 +111,7 @@ class Cors extends BaseConfig
          *
          * @see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Headers
          */
-        'allowedHeaders' => [],
+        'allowedHeaders' => ['Content-Type', 'Authorization', 'X-Requested-With'],
 
         /**
          * Set headers to expose.
@@ -93,7 +136,7 @@ class Cors extends BaseConfig
          *
          * @see https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Access-Control-Allow-Methods
          */
-        'allowedMethods' => [],
+        'allowedMethods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
         /**
          * Set how many seconds the results of a preflight request can be cached.

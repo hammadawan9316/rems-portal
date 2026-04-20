@@ -7,6 +7,12 @@ use CodeIgniter\Router\RouteCollection;
  */
 $routes->get('/', 'Home::index');
 $routes->setAutoRoute(true); // optional but helpful for testing
+
+// Catch API preflight requests so browsers don't get a route-level 404 on OPTIONS.
+$routes->options('api/(.*)', static function () {
+    return service('response')->setStatusCode(204);
+});
+
 $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes) {
     // Public auth routes
     $routes->post('auth/register', 'AuthenticationController::register');

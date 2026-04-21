@@ -42,18 +42,18 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
     $routes->group('', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->group('', ['filter' => 'roleAccess:admin'], function ($routes) {
             $routes->post('categories', 'CategoryController::store');
-            $routes->put('categories/(:num)', 'CategoryController::update/$1');
+            $routes->post('categories/(:num)', 'CategoryController::update/$1');
             $routes->patch('categories/(:num)', 'CategoryController::update/$1');
             $routes->delete('categories/(:num)', 'CategoryController::delete/$1');
 
             $routes->post('services', 'ServiceController::store');
-            $routes->put('services/(:num)', 'ServiceController::update/$1');
+            $routes->post('services/(:num)', 'ServiceController::update/$1');
             $routes->patch('services/(:num)', 'ServiceController::update/$1');
             $routes->delete('services/(:num)', 'ServiceController::delete/$1');
             $routes->post('customers', 'CustomerController::create');
             $routes->get('customers', 'CustomerController::index');
             $routes->get('customers/(:num)', 'CustomerController::show/$1');
-            $routes->put('customers/(:num)', 'CustomerController::update/$1');
+            $routes->post('customers/(:num)', 'CustomerController::update/$1');
             $routes->patch('customers/(:num)', 'CustomerController::update/$1');
             $routes->delete('customers/(:num)', 'CustomerController::delete/$1');
             $routes->get('quotations', 'QuotationController::index');

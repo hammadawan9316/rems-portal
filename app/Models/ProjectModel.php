@@ -27,9 +27,6 @@ class ProjectModel extends Model
         'estimated_amount',
         'payment_type',
         'hourly_hours',
-        'discount_type',
-        'discount_value',
-        'discount_scope',
         'status',
     ];
 

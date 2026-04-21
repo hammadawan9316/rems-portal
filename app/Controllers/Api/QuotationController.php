@@ -74,24 +74,36 @@ class QuotationController extends BaseApiController
         $square = new SquareService();
         $isSquareConfigured = $square->isConfigured();
 
-        $clientName = trim((string) ($data['client_name'] ?? ''));
-        $clientEmail = trim((string) ($data['client_email'] ?? ''));
-        $clientPhone = trim((string) ($data['client_phone'] ?? ''));
-        $company = trim((string) ($data['company'] ?? ''));
-        $customerId = $this->resolveCustomerId($customerModel, $clientName, $clientEmail, $clientPhone, $company);
+        $customerId = (int) ($data['customer_id'] ?? 0);
+        if ($customerId < 1) {
+            return $this->res->badRequest('Customer id is required.', [
+                'customer_id' => 'A valid customer id is required.',
+            ]);
+        }
 
+        $customer = $customerModel->find($customerId);
+        if (!is_array($customer)) {
+            return $this->res->notFound('Customer not found.');
+        }
+
+        $customerName = trim((string) ($customer['name'] ?? ''));
         $firstTitle = trim((string) ($projectItems[0]['project_title'] ?? ''));
-        $title = $firstTitle !== '' ? $firstTitle : 'Quotation for ' . ($clientName !== '' ? $clientName : $clientEmail);
+        $title = $firstTitle !== '' ? $firstTitle : 'Quotation for ' . ($customerName !== '' ? $customerName : '');
         $quoteNumber = $quotationModel->generateQuoteNumber();
 
-        $quotationModel->insert([
+        $quotationPayload = [
             'customer_id' => $customerId,
             'quote_number' => $quoteNumber,
             'title' => $title,
             'status' => 'submitted',
             'notes' => null,
             'submitted_at' => date('Y-m-d H:i:s'),
-        ]);
+            'discount_type' => $this->normalizeDiscountType($data['discount_type'] ?? ($data['discountType'] ?? null)),
+            'discount_value' => $this->normalizeDecimalValue($data['discount_value'] ?? ($data['discountValue'] ?? null)),
+            'discount_scope' => $this->normalizeDiscountScope($data['discount_scope'] ?? ($data['discountScope'] ?? null)),
+        ];
+
+        $quotationModel->insert($quotationPayload);
 
         $quotationId = (int) $quotationModel->getInsertID();
         if ($quotationId < 1) {
@@ -115,9 +127,6 @@ class QuotationController extends BaseApiController
                 'estimated_amount' => $item['estimated_amount'],
                 'payment_type' => $item['payment_type'],
                 'hourly_hours' => $item['hourly_hours'],
-                'discount_type' => $item['discount_type'],
-                'discount_value' => $item['discount_value'],
-                'discount_scope' => $item['discount_scope'],
                 'status' => 'submitted',
             ];
 
@@ -340,9 +349,6 @@ class QuotationController extends BaseApiController
             'service_ids' => $this->normalizeServiceIds($project['services'] ?? ($project['service_ids'] ?? [])),
             'payment_type' => $this->normalizePaymentType($project['payment_type'] ?? ($project['paymentType'] ?? 'fixed_rate')),
             'hourly_hours' => $this->normalizeDecimalValue($project['hourly_hours'] ?? ($project['hours'] ?? null)),
-            'discount_type' => $this->normalizeDiscountType($project['discount_type'] ?? ($project['discountType'] ?? null)),
-            'discount_value' => $this->normalizeDecimalValue($project['discount_value'] ?? ($project['discountValue'] ?? null)),
-            'discount_scope' => $this->normalizeDiscountScope($project['discount_scope'] ?? ($project['discountScope'] ?? null)),
             'scope' => trim((string) ($project['scope'] ?? '')),
             'estimate_type' => trim((string) ($project['estimate_type'] ?? ($project['estimateType'] ?? ''))),
             'zip_code' => trim((string) ($project['zip_code'] ?? ($project['zipCode'] ?? ''))),
@@ -399,25 +405,7 @@ class QuotationController extends BaseApiController
      */
     private function validateNormalizedRequest(array $data): array
     {
-        $errors = [];
-
-        $name = trim((string) ($data['client_name'] ?? ''));
-        $email = trim((string) ($data['client_email'] ?? ''));
-        $phone = trim((string) ($data['client_phone'] ?? ''));
-
-        if ($name === '' || mb_strlen($name) < 2 || mb_strlen($name) > 160) {
-            $errors['client_name'] = 'Client name is required and must be between 2 and 160 characters.';
-        }
-
-        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL) || mb_strlen($email) > 190) {
-            $errors['client_email'] = 'A valid client email is required and must not exceed 190 characters.';
-        }
-
-        if ($phone !== '' && !preg_match('/^\+[1-9][0-9]{7,14}$/', $phone)) {
-            $errors['client_phone'] = 'Client phone must be in valid E.164 format (e.g. +14155552671).';
-        }
-
-        return $errors;
+        return [];
     }
 
     /**
@@ -468,15 +456,6 @@ class QuotationController extends BaseApiController
 
         if ($project['estimated_amount'] !== null && $project['estimated_amount'] !== '' && !is_numeric($project['estimated_amount'])) {
             $errors['projects.' . $index . '.estimated_amount'] = 'Amount must be numeric.';
-        }
-
-        $discountType = $project['discount_type'] ?? null;
-        if ($discountType !== null && $discountType !== '' && !in_array($discountType, ['fixed_amount', 'percentage'], true)) {
-            $errors['projects.' . $index . '.discount_type'] = 'Discount type must be fixed_amount or percentage.';
-        }
-
-        if ($discountType !== null && $discountType !== '' && (!is_numeric($project['discount_value'] ?? null) || (float) $project['discount_value'] <= 0)) {
-            $errors['projects.' . $index . '.discount_value'] = 'Discount value must be greater than 0 when a discount type is provided.';
         }
 
         return $errors;
@@ -692,7 +671,7 @@ class QuotationController extends BaseApiController
     private function normalizeDiscountScope(mixed $value): string
     {
         $discountScope = trim((string) $value);
-        return $discountScope !== '' ? $discountScope : 'project_total';
+        return $discountScope !== '' ? $discountScope : 'quotation_total';
     }
 
     private function normalizeMoneyValue(mixed $value): ?string
@@ -722,41 +701,7 @@ class QuotationController extends BaseApiController
         return date('Y-m-d', $timestamp);
     }
 
-    private function resolveCustomerId(
-        CustomerModel $customerModel,
-        string $name,
-        string $email,
-        string $phone,
-        string $company
-    ): ?int {
-        if ($email === '') {
-            return null;
-        }
 
-        $existing = $customerModel->where('email', $email)->first();
-        $payload = [
-            'name' => $name,
-            'email' => $email,
-            'phone' => $phone === '' ? null : $phone,
-            'company' => $company === '' ? null : $company,
-        ];
-
-        if (is_array($existing)) {
-            $customerId = (int) ($existing['id'] ?? 0);
-            if ($customerId < 1) {
-                return null;
-            }
-
-            $customerModel->update($customerId, $payload);
-
-            return $customerId;
-        }
-
-        $customerModel->insert($payload);
-        $insertId = (int) $customerModel->getInsertID();
-
-        return $insertId > 0 ? $insertId : null;
-    }
 
     /**
      * @param array<string, mixed> $data

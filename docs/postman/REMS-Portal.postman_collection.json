@@ -640,6 +640,114 @@
       ]
     },
     {
+      "name": "Customers",
+      "item": [
+        {
+          "name": "List Customers (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Customer (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"phone\": \"+14155552671\",\n  \"company\": \"Doe Construction\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/customers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Customer (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/customers/{{customer_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customer_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Customer (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Smith\",\n  \"phone\": \"+14155553334\",\n  \"company\": \"Smith & Sons Construction\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/customers/{{customer_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customer_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Customer (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/customers/{{customer_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customer_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "Quotations",
       "item": [
         {
@@ -696,7 +804,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"client_name\": \"{{client_name}}\",\n  \"client_email\": \"{{client_email}}\",\n  \"client_phone\": \"{{client_phone}}\",\n  \"company\": \"{{client_company}}\",\n  \"projects\": [\n    {\n      \"project_title\": \"Quotation Project A\",\n      \"project_description\": \"Scope for quotation\",\n      \"category_id\": {{category_id}},\n      \"service_ids\": [{{service_id_1}}, {{service_id_2}}],\n      \"estimated_amount\": 18000,\n      \"payment_type\": \"fixed_rate\",\n      \"discount_type\": \"fixed_amount\",\n      \"discount_value\": 500,\n      \"discount_scope\": \"project_total\",\n      \"scope\": \"Interior work\",\n      \"estimate_type\": \"complete\",\n      \"zip_code\": \"10001\",\n      \"deadline\": \"standard\",\n      \"deadline_date\": \"2026-05-30\"\n    }\n  ]\n}"
+              "raw": "{\n  \"customer_id\": {{customer_id}},\n  \"projects\": [\n    {\n      \"project_title\": \"Quotation Project A\",\n      \"project_description\": \"Scope for quotation\",\n      \"category_id\": {{category_id}},\n      \"service_ids\": [{{service_id_1}}, {{service_id_2}}],\n      \"estimated_amount\": 18000,\n      \"payment_type\": \"fixed_rate\",\n      \"discount_type\": \"fixed_amount\",\n      \"discount_value\": 500,\n      \"discount_scope\": \"project_total\",\n      \"scope\": \"Interior work\",\n      \"estimate_type\": \"complete\",\n      \"zip_code\": \"10001\",\n      \"deadline\": \"standard\",\n      \"deadline_date\": \"2026-05-30\"\n    }\n  ]\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/quotations/submit",

@@ -96,9 +96,6 @@ class ProjectIntakeController extends BaseApiController
                 'estimated_amount' => $item['estimated_amount'],
                 'payment_type' => $item['payment_type'],
                 'hourly_hours' => $item['hourly_hours'],
-                'discount_type' => $item['discount_type'],
-                'discount_value' => $item['discount_value'],
-                'discount_scope' => $item['discount_scope'],
                 'status' => 'submitted',
             ];
 
@@ -250,9 +247,6 @@ class ProjectIntakeController extends BaseApiController
                     'service_ids' => $this->normalizeServiceIds($project['services'] ?? ($project['service_ids'] ?? [])),
                     'payment_type' => $this->normalizePaymentType($project['payment_type'] ?? ($project['paymentType'] ?? 'fixed_rate')),
                     'hourly_hours' => $this->normalizeDecimalValue($project['hourly_hours'] ?? ($project['hours'] ?? null)),
-                    'discount_type' => $this->normalizeDiscountType($project['discount_type'] ?? ($project['discountType'] ?? null)),
-                    'discount_value' => $this->normalizeDecimalValue($project['discount_value'] ?? ($project['discountValue'] ?? null)),
-                    'discount_scope' => $this->normalizeDiscountScope($project['discount_scope'] ?? ($project['discountScope'] ?? null)),
                     'scope' => trim((string) ($project['scope'] ?? '')),
                     'estimate_type' => trim((string) ($project['estimateType'] ?? ($project['estimate_type'] ?? ''))),
                     'plans_url' => trim((string) ($project['plansUrl'] ?? ($project['plans_url'] ?? ''))),
@@ -278,9 +272,6 @@ class ProjectIntakeController extends BaseApiController
             'service_ids' => $this->normalizeServiceIds($data['services'] ?? ($data['service_ids'] ?? [])),
             'payment_type' => $this->normalizePaymentType($data['payment_type'] ?? ($data['paymentType'] ?? 'fixed_rate')),
             'hourly_hours' => $this->normalizeDecimalValue($data['hourly_hours'] ?? ($data['hours'] ?? null)),
-            'discount_type' => $this->normalizeDiscountType($data['discount_type'] ?? ($data['discountType'] ?? null)),
-            'discount_value' => $this->normalizeDecimalValue($data['discount_value'] ?? ($data['discountValue'] ?? null)),
-            'discount_scope' => $this->normalizeDiscountScope($data['discount_scope'] ?? ($data['discountScope'] ?? null)),
             'scope' => trim((string) ($data['scope'] ?? '')),
             'estimate_type' => trim((string) ($data['estimateType'] ?? ($data['estimate_type'] ?? ''))),
             'plans_url' => trim((string) ($data['plansUrl'] ?? ($data['plans_url'] ?? ''))),
@@ -423,25 +414,6 @@ class ProjectIntakeController extends BaseApiController
         $amount = $item['estimated_amount'] ?? null;
         if ($amount !== null && $amount !== '' && (!is_numeric($amount) || (float) $amount < 0)) {
             $errors['projects.' . $index . '.estimated_amount'] = 'Amount must be a valid number.';
-        }
-
-        $discountType = strtolower(trim((string) ($item['discount_type'] ?? '')));
-        if ($discountType !== '' && !in_array($discountType, ['fixed_amount', 'percentage'], true)) {
-            $errors['projects.' . $index . '.discount_type'] = 'Discount type must be fixed_amount or percentage.';
-        }
-
-        $discountValue = $item['discount_value'] ?? null;
-        if ($discountType !== '') {
-            if (!is_numeric($discountValue) || (float) $discountValue <= 0) {
-                $errors['projects.' . $index . '.discount_value'] = 'Discount value must be greater than 0 when a discount type is provided.';
-            }
-        } elseif ($discountValue !== null && $discountValue !== '' && !is_numeric($discountValue)) {
-            $errors['projects.' . $index . '.discount_value'] = 'Discount value must be numeric.';
-        }
-
-        $discountScope = trim((string) ($item['discount_scope'] ?? 'project_total'));
-        if ($discountScope !== '' && mb_strlen($discountScope) > 40) {
-            $errors['projects.' . $index . '.discount_scope'] = 'Discount scope must not exceed 40 characters.';
         }
 
         return $errors;
@@ -686,9 +658,6 @@ class ProjectIntakeController extends BaseApiController
             $estimatedAmount = (string) ($project['estimated_amount'] ?? '');
             $paymentType = (string) ($project['payment_type'] ?? 'fixed_rate');
             $hourlyHours = (string) ($project['hourly_hours'] ?? '');
-            $discountType = (string) ($project['discount_type'] ?? '');
-            $discountValue = (string) ($project['discount_value'] ?? '');
-            $discountScope = (string) ($project['discount_scope'] ?? 'project_total');
 
             // Project card
             $contentParts[] = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;">';
@@ -736,9 +705,6 @@ class ProjectIntakeController extends BaseApiController
             }
             if ($paymentType === 'hourly' && $hourlyHours !== '' && $hourlyHours !== '0.00') {
                 $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Hours:</strong> ' . esc($hourlyHours) . '</p>';
-            }
-            if ($discountType !== '' && $discountValue !== '' && $discountValue !== '0.00') {
-                $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Discount:</strong> ' . esc(ucfirst(str_replace('_', ' ', $discountType))) . ' - ' . esc($discountValue) . ($discountType === 'percentage' ? '%' : '') . ' on ' . esc($discountScope) . '</p>';
             }
 
             // Project files if any
@@ -842,8 +808,6 @@ class ProjectIntakeController extends BaseApiController
             $paymentType = (string) ($project['payment_type'] ?? 'fixed_rate');
             $estimatedAmount = (string) ($project['estimated_amount'] ?? '');
             $hourlyHours = (string) ($project['hourly_hours'] ?? '');
-            $discountType = (string) ($project['discount_type'] ?? '');
-            $discountValue = (string) ($project['discount_value'] ?? '');
             $deadline = (string) ($project['deadline_date'] ?? '');
 
             $projectsHtml .= '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:16px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;">';
@@ -861,9 +825,6 @@ class ProjectIntakeController extends BaseApiController
             }
             if ($paymentType === 'hourly' && $hourlyHours !== '' && $hourlyHours !== '0.00') {
                 $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Hours:</strong> ' . esc($hourlyHours) . '</p>';
-            }
-            if ($discountType !== '' && $discountValue !== '' && $discountValue !== '0.00') {
-                $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Discount:</strong> ' . esc(ucfirst(str_replace('_', ' ', $discountType))) . ' - ' . esc($discountValue) . ($discountType === 'percentage' ? '%' : '') . '</p>';
             }
             if ($deadline !== '') {
                 $projectsHtml .= '<p style="margin:0;"><strong>Deadline:</strong> ' . esc($deadline) . '</p>';
@@ -1068,9 +1029,6 @@ class ProjectIntakeController extends BaseApiController
             $project['service_ids'] = $serviceIds;
             $project['payment_type'] = (string) ($project['payment_type'] ?? 'fixed_rate');
             $project['hourly_hours'] = $project['hourly_hours'] ?? null;
-            $project['discount_type'] = $project['discount_type'] ?? null;
-            $project['discount_value'] = $project['discount_value'] ?? null;
-            $project['discount_scope'] = (string) ($project['discount_scope'] ?? 'project_total');
         }
         unset($project);
 

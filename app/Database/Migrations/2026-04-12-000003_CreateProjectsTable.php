@@ -65,8 +65,14 @@ class CreateProjectsTable extends Migration
                 'constraint' => 40,
                 'null' => true,
             ],
+            'delivery_date' => [
+                'type' => 'VARCHAR',
+                'constraint' => 40,
+                'null' => true,
+            ],
             'deadline_date' => [
-                'type' => 'DATE',
+                'type' => 'VARCHAR',
+                'constraint' => 40,
                 'null' => true,
             ],
             'estimated_amount' => [

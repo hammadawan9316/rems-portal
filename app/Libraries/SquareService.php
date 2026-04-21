@@ -79,6 +79,7 @@ class SquareService
             'plans_url' => $projectData['plans_url'] ?? null,
             'zip_code' => $projectData['zip_code'] ?? null,
             'deadline' => $projectData['deadline'] ?? null,
+            'delivery_date' => $projectData['delivery_date'] ?? null,
             'deadline_date' => $projectData['deadline_date'] ?? null,
             'estimated_amount' => $estimatedAmountCents,
         ];
@@ -212,6 +213,7 @@ class SquareService
                 'plans_url' => $projectData['plans_url'] ?? null,
                 'zip_code' => $projectData['zip_code'] ?? null,
                 'deadline' => $projectData['deadline'] ?? null,
+                'delivery_date' => $projectData['delivery_date'] ?? null,
                 'deadline_date' => $projectData['deadline_date'] ?? null,
                 'estimated_amount' => $estimatedAmountCents,
                 'payment_type' => $projectData['payment_type'] ?? null,

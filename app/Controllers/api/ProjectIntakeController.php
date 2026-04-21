@@ -92,6 +92,7 @@ class ProjectIntakeController extends BaseApiController
                 'plans_url' => $item['plans_url'],
                 'zip_code' => $item['zip_code'],
                 'deadline' => $item['deadline'],
+                'delivery_date' => $item['delivery_date'],
                 'deadline_date' => $item['deadline_date'],
                 'estimated_amount' => $item['estimated_amount'],
                 'payment_type' => $item['payment_type'],
@@ -252,7 +253,8 @@ class ProjectIntakeController extends BaseApiController
                     'plans_url' => trim((string) ($project['plansUrl'] ?? ($project['plans_url'] ?? ''))),
                     'zip_code' => trim((string) ($project['zipCode'] ?? ($project['zip_code'] ?? ''))),
                     'deadline' => trim((string) ($project['deadline'] ?? '')),
-                    'deadline_date' => $this->normalizeDateString($project['deadlineDate'] ?? ($project['deadline_date'] ?? null)),
+                    'delivery_date' => trim((string) ($project['delivery_date'] ?? ($project['deliveryDate'] ?? ''))),
+                    'deadline_date' => trim((string) ($project['deadline_date'] ?? ($project['deadlineDate'] ?? ''))),
                 ];
             }
 
@@ -277,7 +279,8 @@ class ProjectIntakeController extends BaseApiController
             'plans_url' => trim((string) ($data['plansUrl'] ?? ($data['plans_url'] ?? ''))),
             'zip_code' => trim((string) ($data['zipCode'] ?? ($data['zip_code'] ?? ''))),
             'deadline' => trim((string) ($data['deadline'] ?? '')),
-            'deadline_date' => $this->normalizeDateString($data['deadlineDate'] ?? ($data['deadline_date'] ?? null)),
+            'delivery_date' => trim((string) ($data['delivery_date'] ?? ($data['deliveryDate'] ?? ''))),
+            'deadline_date' => trim((string) ($data['deadline_date'] ?? ($data['deadlineDate'] ?? ''))),
         ];
 
         return $items;
@@ -374,10 +377,6 @@ class ProjectIntakeController extends BaseApiController
 
             if ($item['plans_url'] !== '' && !$this->isValidPlansUrl($item['plans_url'])) {
                 $errors['projects.' . $index . '.plansUrl'] = 'Plans URL must be a valid URL.';
-            }
-
-            if ($item['deadline_date'] !== null && strtotime((string) $item['deadline_date']) === false) {
-                $errors['projects.' . $index . '.deadlineDate'] = 'Deadline date must be a valid date.';
             }
 
             $billingErrors = $this->validateProjectBillingItem($item, $index);
@@ -595,8 +594,7 @@ class ProjectIntakeController extends BaseApiController
         string $clientName,
         string $clientEmail,
         array $squareResults
-    ): void
-    {
+    ): void {
         /** @var Square $squareConfig */
         $squareConfig = config('Square');
         $to = trim($squareConfig->ownerNotificationEmail);
@@ -613,7 +611,6 @@ class ProjectIntakeController extends BaseApiController
             $quotationNumber = (string) ($quotation['quote_number'] ?? '');
         }
 
-        // Build quotation summary
         $contentParts = [
             '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">A new quotation with ' . esc((string) $projectCount) . ' project(s) was submitted from the website.</p>',
             
@@ -654,6 +651,7 @@ class ProjectIntakeController extends BaseApiController
             $plansUrl = (string) ($project['plans_url'] ?? '');
             $zipCode = (string) ($project['zip_code'] ?? '');
             $deadline = (string) ($project['deadline'] ?? '');
+            $deliveryDate = (string) ($project['delivery_date'] ?? '');
             $deadlineDate = (string) ($project['deadline_date'] ?? '');
             $estimatedAmount = (string) ($project['estimated_amount'] ?? '');
             $paymentType = (string) ($project['payment_type'] ?? 'fixed_rate');
@@ -675,7 +673,7 @@ class ProjectIntakeController extends BaseApiController
             }
 
             // Project Details
-            if ($scope !== '' || $estimateType !== '' || $plansUrl !== '' || $zipCode !== '' || $deadline !== '' || $deadlineDate !== '') {
+            if ($scope !== '' || $estimateType !== '' || $plansUrl !== '' || $zipCode !== '' || $deadline !== '' || $deliveryDate !== '' || $deadlineDate !== '') {
                 $contentParts[] = '<p style="margin:12px 0 8px 0;"><strong style="color:#0f172a;">Project Details</strong></p>';
                 if ($scope !== '') {
                     $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Scope:</strong> ' . esc($scope) . '</p>';
@@ -690,7 +688,10 @@ class ProjectIntakeController extends BaseApiController
                     $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Zip Code:</strong> ' . esc($zipCode) . '</p>';
                 }
                 if ($deadline !== '') {
-                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Deadline:</strong> ' . esc($deadline) . '</p>';
+                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Bid Deadline:</strong> ' . esc($deadline) . '</p>';
+                }
+                if ($deliveryDate !== '') {
+                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Delivery Date:</strong> ' . esc($deliveryDate) . '</p>';
                 }
                 if ($deadlineDate !== '') {
                     $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Deadline Date:</strong> ' . esc($deadlineDate) . '</p>';
@@ -808,7 +809,8 @@ class ProjectIntakeController extends BaseApiController
             $paymentType = (string) ($project['payment_type'] ?? 'fixed_rate');
             $estimatedAmount = (string) ($project['estimated_amount'] ?? '');
             $hourlyHours = (string) ($project['hourly_hours'] ?? '');
-            $deadline = (string) ($project['deadline_date'] ?? '');
+            $deadline = (string) ($project['deadline'] ?? '');
+            $deliveryDate = (string) ($project['delivery_date'] ?? '');
 
             $projectsHtml .= '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:16px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;">';
             $projectsHtml .= '<tr><td style="padding:12px;background:#0f172a;"><strong style="color:#ffffff;">Project #' . esc((string) $projectId) . ': ' . esc($projectTitle) . '</strong></td></tr>';
@@ -827,7 +829,10 @@ class ProjectIntakeController extends BaseApiController
                 $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Hours:</strong> ' . esc($hourlyHours) . '</p>';
             }
             if ($deadline !== '') {
-                $projectsHtml .= '<p style="margin:0;"><strong>Deadline:</strong> ' . esc($deadline) . '</p>';
+                $projectsHtml .= '<p style="margin:0;"><strong>Bid Deadline:</strong> ' . esc($deadline) . '</p>';
+            }
+            if ($deliveryDate !== '') {
+                $projectsHtml .= '<p style="margin:0;"><strong>Delivery Date:</strong> ' . esc($deliveryDate) . '</p>';
             }
             
             $projectsHtml .= '</td></tr>';

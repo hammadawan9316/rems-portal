@@ -23,6 +23,7 @@ class ProjectModel extends Model
         'plans_url',
         'zip_code',
         'deadline',
+        'delivery_date',
         'deadline_date',
         'estimated_amount',
         'payment_type',

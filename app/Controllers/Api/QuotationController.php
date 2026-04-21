@@ -15,27 +15,7 @@ class QuotationController extends BaseApiController
 {
     public function store()
     {
-        $data = $this->getRequestData(false);
-        $errors = $this->validateQuotationPayload($data);
-        if ($errors !== []) {
-            return $this->res->validation($errors);
-        }
-
-        $quotationModel = new QuotationModel();
-        $quoteNumber = $quotationModel->generateQuoteNumber();
-
-        $payload = [
-            'customer_id' => isset($data['customer_id']) ? (int) $data['customer_id'] : null,
-            'quote_number' => $quoteNumber,
-            'title' => trim((string) ($data['title'] ?? 'Quotation')),
-            'status' => trim((string) ($data['status'] ?? 'submitted')) ?: 'submitted',
-            'notes' => trim((string) ($data['notes'] ?? '')) ?: null,
-            'submitted_at' => date('Y-m-d H:i:s'),
-        ];
-
-        $quotationModel->insert($payload);
-
-        return $this->res->created($quotationModel->find((int) $quotationModel->getInsertID()), 'Quotation created successfully');
+        return $this->submit();
     }
 
     public function submit()
@@ -87,8 +67,11 @@ class QuotationController extends BaseApiController
         }
 
         $customerName = trim((string) ($customer['name'] ?? ''));
+        $requestedTitle = trim((string) ($data['title'] ?? ''));
         $firstTitle = trim((string) ($projectItems[0]['project_title'] ?? ''));
-        $title = $firstTitle !== '' ? $firstTitle : 'Quotation for ' . ($customerName !== '' ? $customerName : '');
+        $title = $requestedTitle !== ''
+            ? $requestedTitle
+            : ($firstTitle !== '' ? $firstTitle : 'Quotation for ' . ($customerName !== '' ? $customerName : ''));
         $quoteNumber = $quotationModel->generateQuoteNumber();
 
         $quotationPayload = [

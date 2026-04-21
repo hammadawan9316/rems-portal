@@ -27,6 +27,11 @@ class CreateCategoriesTable extends Migration
                 'type' => 'TEXT',
                 'null' => true,
             ],
+            'image' => [
+                'type' => 'VARCHAR',
+                'constraint' => 190,
+                'null' => true,
+            ],
             'is_active' => [
                 'type' => 'BOOLEAN',
                 'default' => true,

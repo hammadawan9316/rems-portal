@@ -357,15 +357,40 @@
           "name": "Create Category (Admin)",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
             "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"General Construction\",\n  \"slug\": \"general-construction\",\n  \"description\": \"General project category\",\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "name",
+                  "value": "General Construction",
+                  "type": "text"
+                },
+                {
+                  "key": "slug",
+                  "value": "general-construction",
+                  "type": "text"
+                },
+                {
+                  "key": "description",
+                  "value": "General project category",
+                  "type": "text"
+                },
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "is_active",
+                  "value": "true",
+                  "type": "text"
+                },
+                {
+                  "key": "sort_order",
+                  "value": "1",
+                  "type": "text"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/api/categories",
@@ -391,7 +416,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"description\": \"Updated category description\",\n  \"sort_order\": 2\n}"
+              "raw": "{\n  \"description\": \"Updated category description\",\n  \"image\": \"https://cdn.example.com/categories/general-construction-updated.jpg\",\n  \"sort_order\": 2\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/api/categories/{{category_id}}",

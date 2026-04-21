@@ -98,6 +98,7 @@ class CategoryServiceSeeder extends Seeder
                 'name' => $category['name'],
                 'slug' => $category['slug'],
                 'description' => $category['description'],
+                'image' => null,
                 'is_active' => 1,
                 'sort_order' => $category['sort_order'],
                 'updated_at' => $now,

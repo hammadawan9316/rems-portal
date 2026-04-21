@@ -101,7 +101,7 @@ class ServiceModel extends Model
         }
 
         $rows = $this->db->table('service_categories sc')
-            ->select('sc.service_id, c.id AS category_id, c.name, c.slug, c.description, c.is_active, c.sort_order')
+            ->select('sc.service_id, c.id AS category_id, c.name, c.slug, c.description, c.image, c.is_active, c.sort_order')
             ->join('categories c', 'c.id = sc.category_id')
             ->whereIn('sc.service_id', $serviceIds)
             ->orderBy('c.sort_order', 'ASC')
@@ -117,6 +117,7 @@ class ServiceModel extends Model
                 'name' => (string) ($row['name'] ?? ''),
                 'slug' => (string) ($row['slug'] ?? ''),
                 'description' => $row['description'] ?? null,
+                'image' => $row['image'] ?? null,
                 'is_active' => (bool) ($row['is_active'] ?? false),
                 'sort_order' => (int) ($row['sort_order'] ?? 0),
             ];

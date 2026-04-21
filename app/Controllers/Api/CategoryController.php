@@ -33,6 +33,15 @@ class CategoryController extends BaseApiController
     public function store()
     {
         $data = $this->getRequestData(false);
+        $uploadedImage = $this->uploadCategoryImage();
+        if (isset($uploadedImage['error'])) {
+            return $this->res->validation(['image' => (string) $uploadedImage['error']]);
+        }
+
+        if (isset($uploadedImage['path'])) {
+            $data['image'] = $uploadedImage['path'];
+        }
+
         $errors = $this->validateCategory($data);
         if ($errors !== []) {
             return $this->res->validation($errors);
@@ -43,6 +52,7 @@ class CategoryController extends BaseApiController
             'name' => trim((string) $data['name']),
             'slug' => $this->resolveSlug((string) ($data['slug'] ?? ''), (string) $data['name']),
             'description' => trim((string) ($data['description'] ?? '')),
+            'image' => trim((string) ($data['image'] ?? '')) ?: null,
             'is_active' => $this->normalizeBool($data['is_active'] ?? true),
             'sort_order' => (int) ($data['sort_order'] ?? 0),
         ];
@@ -66,6 +76,15 @@ class CategoryController extends BaseApiController
         }
 
         $data = $this->getRequestData(false);
+        $uploadedImage = $this->uploadCategoryImage();
+        if (isset($uploadedImage['error'])) {
+            return $this->res->validation(['image' => (string) $uploadedImage['error']]);
+        }
+
+        if (isset($uploadedImage['path'])) {
+            $data['image'] = $uploadedImage['path'];
+        }
+
         $payload = [];
 
         if (isset($data['name'])) {
@@ -86,6 +105,14 @@ class CategoryController extends BaseApiController
 
         if (isset($data['description'])) {
             $payload['description'] = trim((string) $data['description']);
+        }
+
+        if (array_key_exists('image', $data)) {
+            $image = trim((string) $data['image']);
+            if ($image !== '' && mb_strlen($image) > 190) {
+                return $this->res->validation(['image' => 'Category image must not exceed 190 characters.']);
+            }
+            $payload['image'] = $image !== '' ? $image : null;
         }
 
         if (isset($data['is_active'])) {
@@ -132,6 +159,11 @@ class CategoryController extends BaseApiController
             $errors['slug'] = 'Category slug must not exceed 180 characters.';
         }
 
+        $image = trim((string) ($data['image'] ?? ''));
+        if ($image !== '' && mb_strlen($image) > 190) {
+            $errors['image'] = 'Category image must not exceed 190 characters.';
+        }
+
         return $errors;
     }
 
@@ -152,5 +184,43 @@ class CategoryController extends BaseApiController
 
         $normalized = strtolower(trim((string) $value));
         return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+    }
+
+    /**
+     * @return array{path?:string,error?:string}
+     */
+    private function uploadCategoryImage(): array
+    {
+        $file = $this->request->getFile('image');
+        if ($file === null) {
+            return [];
+        }
+
+        if ($file->getError() === UPLOAD_ERR_NO_FILE) {
+            return [];
+        }
+
+        $directory = 'categories/' . date('Y') . '/' . date('m');
+        $result = $this->uploadService->uploadSingle(
+            $this->request,
+            'image',
+            $directory,
+            ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+            10240
+        );
+
+        if (($result['status'] ?? false) !== true) {
+            $errors = $result['errors'] ?? [];
+            $errorMessage = is_array($errors) ? (string) ($errors['image'] ?? $result['message'] ?? 'Image upload failed.') : (string) ($result['message'] ?? 'Image upload failed.');
+            return ['error' => $errorMessage];
+        }
+
+        $uploadData = $result['data'] ?? [];
+        $relativePath = trim((string) ($uploadData['relative_path'] ?? ''));
+        if ($relativePath === '') {
+            return ['error' => 'Image upload failed due to missing file path.'];
+        }
+
+        return ['path' => $relativePath];
     }
 }

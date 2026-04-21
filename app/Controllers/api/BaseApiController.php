@@ -86,4 +86,30 @@ class BaseApiController extends BaseController
 
         return true;
     }
+
+    /**
+     * Normalize pagination and search query parameters for list endpoints.
+     *
+     * @return array{page:int,perPage:int,search:string,offset:int}
+     */
+    protected function getListQueryParams(int $defaultPerPage = 20, int $maxPerPage = 100): array
+    {
+        $page = max(1, (int) ($this->request->getGet('page') ?? 1));
+        $perPage = (int) ($this->request->getGet('per_page') ?? $this->request->getGet('limit') ?? $defaultPerPage);
+        if ($perPage < 1) {
+            $perPage = $defaultPerPage;
+        }
+        if ($perPage > $maxPerPage) {
+            $perPage = $maxPerPage;
+        }
+
+        $search = trim((string) ($this->request->getGet('search') ?? $this->request->getGet('q') ?? ''));
+
+        return [
+            'page' => $page,
+            'perPage' => $perPage,
+            'search' => $search,
+            'offset' => ($page - 1) * $perPage,
+        ];
+    }
 }

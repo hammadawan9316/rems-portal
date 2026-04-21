@@ -10,9 +10,10 @@ class CategoryController extends BaseApiController
     public function index()
     {
         $categoryModel = new CategoryModel();
-        $categories = $categoryModel->withServiceCount();
+        $params = $this->getListQueryParams();
+        $result = $categoryModel->paginateWithServiceCount($params['search'], $params['perPage'], $params['offset']);
 
-        return $this->res->ok($categories, 'Categories retrieved successfully');
+        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Categories retrieved successfully');
     }
 
     public function show(int $id)

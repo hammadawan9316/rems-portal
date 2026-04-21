@@ -43,9 +43,10 @@ class CustomerController extends BaseApiController
     public function index()
     {
         $customerModel = new CustomerModel();
-        $customers = $customerModel->orderBy('id', 'DESC')->findAll();
+        $params = $this->getListQueryParams();
+        $result = $customerModel->paginateCustomers($params['search'], $params['perPage'], $params['offset']);
 
-        return $this->res->ok($customers, 'Customers retrieved successfully');
+        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Customers retrieved successfully');
     }
 
     public function show(int $id)

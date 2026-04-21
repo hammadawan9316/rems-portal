@@ -10,11 +10,11 @@ class ServiceController extends BaseApiController
     public function index()
     {
         $serviceModel = new ServiceModel();
+        $params = $this->getListQueryParams();
         $categoryId = $this->request->getGet('category_id');
+        $result = $serviceModel->paginateWithCategories($categoryId !== null ? (int) $categoryId : null, $params['search'], $params['perPage'], $params['offset']);
 
-        $services = $serviceModel->withCategories($categoryId !== null ? (int) $categoryId : null);
-
-        return $this->res->ok($services, 'Services retrieved successfully');
+        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Services retrieved successfully');
     }
 
     public function byCategory(int $categoryId)

@@ -46,4 +46,46 @@ class CustomerModel extends Model
             'user_id' => $userId,
         ]);
     }
+
+    /**
+     * @return array{items:array<int, array<string, mixed>>, total:int}
+     */
+    public function paginateCustomers(string $search = '', int $perPage = 20, int $offset = 0): array
+    {
+        $search = trim($search);
+
+        $countBuilder = $this->builder()->select('COUNT(*) AS total', false);
+        if ($search !== '') {
+            $countBuilder->groupStart()
+                ->like('name', $search)
+                ->orLike('email', $search)
+                ->orLike('phone', $search)
+                ->orLike('company', $search)
+                ->groupEnd();
+        }
+
+        $totalRow = $countBuilder->get()->getRowArray();
+        $total = (int) ($totalRow['total'] ?? 0);
+
+        $itemsBuilder = $this->builder();
+        if ($search !== '') {
+            $itemsBuilder->groupStart()
+                ->like('name', $search)
+                ->orLike('email', $search)
+                ->orLike('phone', $search)
+                ->orLike('company', $search)
+                ->groupEnd();
+        }
+
+        $items = $itemsBuilder
+            ->orderBy('id', 'DESC')
+            ->limit($perPage, $offset)
+            ->get()
+            ->getResultArray();
+
+        return [
+            'items' => $items,
+            'total' => $total,
+        ];
+    }
 }

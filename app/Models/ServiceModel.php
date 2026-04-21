@@ -61,6 +61,73 @@ class ServiceModel extends Model
         return $this->attachCategories($services);
     }
 
+    /**
+     * @return array{items:array<int, array<string, mixed>>, total:int}
+     */
+    public function paginateWithCategories(?int $categoryId, string $search = '', int $perPage = 20, int $offset = 0): array
+    {
+        $search = trim($search);
+
+        $countBuilder = $this->builder()
+            ->select('COUNT(DISTINCT services.id) AS total', false)
+            ->join('service_categories', 'service_categories.service_id = services.id')
+            ->join('categories', 'categories.id = service_categories.category_id');
+
+        if ($categoryId !== null) {
+            $countBuilder->where('service_categories.category_id', $categoryId);
+        }
+
+        if ($search !== '') {
+            $countBuilder->groupStart()
+                ->like('services.name', $search)
+                ->orLike('services.slug', $search)
+                ->orLike('services.description', $search)
+                ->groupEnd();
+        }
+
+        $totalRow = $countBuilder->get()->getRowArray();
+        $total = (int) ($totalRow['total'] ?? 0);
+
+        $itemsBuilder = $this->builder()
+            ->select('services.*')
+            ->distinct()
+            ->join('service_categories', 'service_categories.service_id = services.id')
+            ->join('categories', 'categories.id = service_categories.category_id');
+
+        if ($categoryId !== null) {
+            $itemsBuilder->where('service_categories.category_id', $categoryId);
+        }
+
+        if ($search !== '') {
+            $itemsBuilder->groupStart()
+                ->like('services.name', $search)
+                ->orLike('services.slug', $search)
+                ->orLike('services.description', $search)
+                ->groupEnd();
+        }
+
+        $items = $itemsBuilder
+            ->orderBy('services.sort_order', 'ASC')
+            ->orderBy('services.name', 'ASC')
+            ->limit($perPage, $offset)
+            ->get()
+            ->getResultArray();
+
+        return [
+            'items' => $this->attachCategories($items),
+            'total' => $total,
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $services
+     * @return array<int, array<string, mixed>>
+     */
+    public function attachCategoriesToRows(array $services): array
+    {
+        return $this->attachCategories($services);
+    }
+
     public function findDetailed(int $id): ?array
     {
         $service = $this->select('services.*')

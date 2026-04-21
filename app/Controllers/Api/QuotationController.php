@@ -158,19 +158,11 @@ class QuotationController extends BaseApiController
     public function index()
     {
         $quotationModel = new QuotationModel();
+        $params = $this->getListQueryParams();
         $customerId = (int) ($this->request->getGet('customer_id') ?? 0);
+        $result = $quotationModel->paginateQuotations($customerId > 0 ? $customerId : null, $params['search'], $params['perPage'], $params['offset']);
 
-        $builder = $quotationModel
-            ->select('quotations.*')
-            ->orderBy('quotations.id', 'DESC');
-
-        if ($customerId > 0) {
-            $builder->where('quotations.customer_id', $customerId);
-        }
-
-        $quotations = $builder->findAll();
-
-        return $this->res->ok($this->attachSummary($quotations), 'Quotations retrieved successfully');
+        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Quotations retrieved successfully');
     }
 
     public function show(int $id)
@@ -203,51 +195,10 @@ class QuotationController extends BaseApiController
         }
 
         $quotationModel = new QuotationModel();
-        $quotations = $quotationModel
-            ->where('customer_id', $customerId)
-            ->orderBy('id', 'DESC')
-            ->findAll();
+        $params = $this->getListQueryParams();
+        $result = $quotationModel->paginateQuotations($customerId, $params['search'], $params['perPage'], $params['offset']);
 
-        return $this->res->ok($this->attachSummary($quotations), 'Customer quotations retrieved successfully');
-    }
-
-    /**
-     * @param array<int, array<string, mixed>> $quotations
-     * @return array<int, array<string, mixed>>
-     */
-    private function attachSummary(array $quotations): array
-    {
-        if ($quotations === []) {
-            return [];
-        }
-
-        $ids = array_map(static fn (array $q): int => (int) ($q['id'] ?? 0), $quotations);
-        $ids = array_values(array_filter($ids));
-        if ($ids === []) {
-            return $quotations;
-        }
-
-        $projectRows = model(ProjectModel::class)
-            ->select('quotation_id, COUNT(*) AS total')
-            ->whereIn('quotation_id', $ids)
-            ->groupBy('quotation_id')
-            ->findAll();
-
-        $projectCountMap = [];
-        foreach ($projectRows as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $projectCountMap[(int) ($row['quotation_id'] ?? 0)] = (int) ($row['total'] ?? 0);
-        }
-
-        foreach ($quotations as &$quotation) {
-            $qid = (int) ($quotation['id'] ?? 0);
-            $quotation['project_count'] = $projectCountMap[$qid] ?? 0;
-        }
-        unset($quotation);
-
-        return $quotations;
+        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Customer quotations retrieved successfully');
     }
 
     /**
@@ -298,9 +249,6 @@ class QuotationController extends BaseApiController
             $project['service_ids'] = $serviceIdsByProject[$projectId] ?? [];
             $project['payment_type'] = (string) ($project['payment_type'] ?? 'fixed_rate');
             $project['hourly_hours'] = $project['hourly_hours'] ?? null;
-            $project['discount_type'] = $project['discount_type'] ?? null;
-            $project['discount_value'] = $project['discount_value'] ?? null;
-            $project['discount_scope'] = (string) ($project['discount_scope'] ?? 'project_total');
         }
         unset($project);
 

@@ -71,9 +71,9 @@ class QuotationController extends BaseApiController
         $quotationPayload = [
             'customer_id' => $customerId,
             'quote_number' => $quoteNumber,
-            'title' => null,
+            'description' => $this->normalizeNullableText($data['description'] ?? ($data['title'] ?? null)),
             'status' => 'submitted',
-            'notes' => null,
+            'notes' => $this->normalizeNullableText($data['notes'] ?? null),
             'submitted_at' => date('Y-m-d H:i:s'),
             'discount_type' => $this->normalizeDiscountType($data['discount_type'] ?? ($data['discountType'] ?? null)),
             'discount_value' => $this->normalizeDecimalValue($data['discount_value'] ?? ($data['discountValue'] ?? null)),
@@ -100,6 +100,7 @@ class QuotationController extends BaseApiController
                 'plans_url' => null,
                 'zip_code' => $item['zip_code'],
                 'deadline' => $item['deadline'],
+                'delivery_date' => $item['delivery_date'],
                 'deadline_date' => $item['deadline_date'],
                 'estimated_amount' => $item['estimated_amount'],
                 'payment_type' => $item['payment_type'],
@@ -125,6 +126,7 @@ class QuotationController extends BaseApiController
         if (!is_array($quotation)) {
             $quotation = [];
         }
+        $quotation = $this->formatQuotationForResponse($quotation);
 
         $quotation['projects'] = $this->formatProjectsForResponse($createdProjects);
         $quotation['project_count'] = count($createdProjects);
@@ -138,8 +140,9 @@ class QuotationController extends BaseApiController
         $params = $this->getListQueryParams();
         $customerId = (int) ($this->request->getGet('customer_id') ?? 0);
         $result = $quotationModel->paginateQuotations($customerId > 0 ? $customerId : null, $params['search'], $params['perPage'], $params['offset']);
+        $items = array_map(fn (array $quotation): array => $this->formatQuotationForResponse($quotation), $result['items']);
 
-        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Quotations retrieved successfully');
+        return $this->res->paginated($items, $result['total'], $params['page'], $params['perPage'], 'Quotations retrieved successfully');
     }
 
     public function show(int $id)
@@ -149,6 +152,7 @@ class QuotationController extends BaseApiController
         if (!is_array($quotation)) {
             return $this->res->notFound('Quotation not found');
         }
+        $quotation = $this->formatQuotationForResponse($quotation);
 
         $projectModel = new ProjectModel();
 
@@ -174,8 +178,9 @@ class QuotationController extends BaseApiController
         $quotationModel = new QuotationModel();
         $params = $this->getListQueryParams();
         $result = $quotationModel->paginateQuotations($customerId, $params['search'], $params['perPage'], $params['offset']);
+        $items = array_map(fn (array $quotation): array => $this->formatQuotationForResponse($quotation), $result['items']);
 
-        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Customer quotations retrieved successfully');
+        return $this->res->paginated($items, $result['total'], $params['page'], $params['perPage'], 'Customer quotations retrieved successfully');
     }
 
     /**
@@ -226,6 +231,8 @@ class QuotationController extends BaseApiController
             $project['service_ids'] = $serviceIdsByProject[$projectId] ?? [];
             $project['payment_type'] = (string) ($project['payment_type'] ?? 'fixed_rate');
             $project['hourly_hours'] = $project['hourly_hours'] ?? null;
+
+            unset($project['nature'], $project['trades']);
         }
         unset($project);
 
@@ -278,6 +285,7 @@ class QuotationController extends BaseApiController
             'estimate_type' => trim((string) ($project['estimate_type'] ?? ($project['estimateType'] ?? ''))),
             'zip_code' => trim((string) ($project['zip_code'] ?? ($project['zipCode'] ?? ''))),
             'deadline' => trim((string) ($project['deadline'] ?? '')),
+            'delivery_date' => $this->normalizeDateString($project['delivery_date'] ?? ($project['deliveryDate'] ?? null)),
             'deadline_date' => $this->normalizeDateString($project['deadline_date'] ?? ($project['deadlineDate'] ?? null)),
         ];
     }
@@ -344,6 +352,10 @@ class QuotationController extends BaseApiController
         foreach ($projectItems as $index => $item) {
             if ($item['deadline_date'] !== null && strtotime((string) $item['deadline_date']) === false) {
                 $errors['projects.' . $index . '.deadlineDate'] = 'Deadline date must be a valid date.';
+            }
+
+            if ($item['delivery_date'] !== null && strtotime((string) $item['delivery_date']) === false) {
+                $errors['projects.' . $index . '.deliveryDate'] = 'Delivery date must be a valid date.';
             }
 
             foreach ($this->validateProjectBillingItem($item, $index) as $field => $message) {
@@ -582,7 +594,32 @@ class QuotationController extends BaseApiController
     private function normalizeDiscountType(mixed $value): ?string
     {
         $discountType = strtolower(trim((string) $value));
+        if ($discountType === 'fixed') {
+            return 'fixed_amount';
+        }
+
         return in_array($discountType, ['fixed_amount', 'percentage'], true) ? $discountType : null;
+    }
+
+    private function normalizeNullableText(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $text = trim($value);
+        return $text === '' ? null : $text;
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     * @return array<string, mixed>
+     */
+    private function formatQuotationForResponse(array $quotation): array
+    {
+        unset($quotation['title']);
+
+        return $quotation;
     }
 
     private function normalizeDiscountScope(mixed $value): string

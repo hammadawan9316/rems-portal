@@ -15,7 +15,7 @@ class QuotationModel extends Model
     protected $allowedFields = [
         'customer_id',
         'quote_number',
-        'title',
+        'description',
         'status',
         'notes',
         'discount_type',
@@ -57,7 +57,7 @@ class QuotationModel extends Model
         if ($search !== '') {
             $countBuilder->groupStart()
                 ->like('quotations.quote_number', $search)
-                ->orLike('quotations.title', $search)
+                ->orLike('quotations.description', $search)
                 ->orLike('quotations.status', $search)
                 ->orLike('quotations.notes', $search)
                 ->orLike('customers.name', $search)
@@ -80,7 +80,7 @@ class QuotationModel extends Model
         if ($search !== '') {
             $itemsBuilder->groupStart()
                 ->like('quotations.quote_number', $search)
-                ->orLike('quotations.title', $search)
+                ->orLike('quotations.description', $search)
                 ->orLike('quotations.status', $search)
                 ->orLike('quotations.notes', $search)
                 ->orLike('customers.name', $search)

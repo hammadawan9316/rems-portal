@@ -69,7 +69,8 @@ class ProjectIntakeController extends BaseApiController
 
         $quotationId = $this->createQuotation(
             $quotationModel,
-            $customerId
+            $customerId,
+            $data
         );
 
         $createdProjects = [];
@@ -175,15 +176,19 @@ class ProjectIntakeController extends BaseApiController
      */
     private function createQuotation(
         QuotationModel $quotationModel,
-        ?int $customerId
+        ?int $customerId,
+        array $data
     ): ?int {
         $quoteNumber = $quotationModel->generateQuoteNumber();
+        $description = trim((string) ($data['description'] ?? ($data['title'] ?? '')));
+        $notes = trim((string) ($data['notes'] ?? ''));
+
         $quotationModel->insert([
             'customer_id' => $customerId,
             'quote_number' => $quoteNumber,
-            'title' => null,
+            'description' => $description !== '' ? $description : null,
             'status' => 'submitted',
-            'notes' => null,
+            'notes' => $notes !== '' ? $notes : null,
             'submitted_at' => date('Y-m-d H:i:s'),
         ]);
 
@@ -245,8 +250,8 @@ class ProjectIntakeController extends BaseApiController
                     'plans_url' => trim((string) ($project['plansUrl'] ?? ($project['plans_url'] ?? ''))),
                     'zip_code' => trim((string) ($project['zipCode'] ?? ($project['zip_code'] ?? ''))),
                     'deadline' => trim((string) ($project['deadline'] ?? '')),
-                    'delivery_date' => trim((string) ($project['delivery_date'] ?? ($project['deliveryDate'] ?? ''))),
-                    'deadline_date' => trim((string) ($project['deadline_date'] ?? ($project['deadlineDate'] ?? ''))),
+                    'delivery_date' => $this->normalizeDateString($project['delivery_date'] ?? ($project['deliveryDate'] ?? null)),
+                    'deadline_date' => $this->normalizeDateString($project['deadline_date'] ?? ($project['deadlineDate'] ?? null)),
                 ];
             }
 
@@ -267,8 +272,8 @@ class ProjectIntakeController extends BaseApiController
             'plans_url' => trim((string) ($data['plansUrl'] ?? ($data['plans_url'] ?? ''))),
             'zip_code' => trim((string) ($data['zipCode'] ?? ($data['zip_code'] ?? ''))),
             'deadline' => trim((string) ($data['deadline'] ?? '')),
-            'delivery_date' => trim((string) ($data['delivery_date'] ?? ($data['deliveryDate'] ?? ''))),
-            'deadline_date' => trim((string) ($data['deadline_date'] ?? ($data['deadlineDate'] ?? ''))),
+            'delivery_date' => $this->normalizeDateString($data['delivery_date'] ?? ($data['deliveryDate'] ?? null)),
+            'deadline_date' => $this->normalizeDateString($data['deadline_date'] ?? ($data['deadlineDate'] ?? null)),
         ];
 
         return $items;
@@ -1011,6 +1016,8 @@ class ProjectIntakeController extends BaseApiController
             $project['service_ids'] = $serviceIds;
             $project['payment_type'] = (string) ($project['payment_type'] ?? 'fixed_rate');
             $project['hourly_hours'] = $project['hourly_hours'] ?? null;
+
+            unset($project['nature'], $project['trades']);
         }
         unset($project);
 

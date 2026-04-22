@@ -226,7 +226,7 @@ class SquareProjectQueueService
                 $estimate = $square->createDraftEstimateForQuotation(
                     $quotationId,
                     (string) $customer['id'],
-                    (string) ($quotation['title'] ?? ('Quotation #' . $quotationId)),
+                    (string) ($quotation['description'] ?? ('Quotation #' . $quotationId)),
                     $quotation,
                     $projectEntries
                 );

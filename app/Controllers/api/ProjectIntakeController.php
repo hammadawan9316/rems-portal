@@ -24,7 +24,7 @@ class ProjectIntakeController extends BaseApiController
 
         if ($projectItems === []) {
             return $this->res->badRequest('At least one project is required.', [
-                'projects' => 'Provide project_title or a projects array with one or more items, or the new payload format.',
+                'projects' => 'Provide a projects array with one or more items, or the new payload format.',
             ]);
         }
 
@@ -69,10 +69,7 @@ class ProjectIntakeController extends BaseApiController
 
         $quotationId = $this->createQuotation(
             $quotationModel,
-            $customerId,
-            $projectItems,
-            $clientName,
-            $clientEmail
+            $customerId
         );
 
         $createdProjects = [];
@@ -178,18 +175,13 @@ class ProjectIntakeController extends BaseApiController
      */
     private function createQuotation(
         QuotationModel $quotationModel,
-        ?int $customerId,
-        array $projectItems,
-        string $clientName,
-        string $clientEmail
+        ?int $customerId
     ): ?int {
-        $firstTitle = trim((string) ($projectItems[0]['project_title'] ?? ''));
-        $title = $firstTitle !== '' ? $firstTitle : 'Quotation for ' . ($clientName !== '' ? $clientName : $clientEmail);
         $quoteNumber = $quotationModel->generateQuoteNumber();
         $quotationModel->insert([
             'customer_id' => $customerId,
             'quote_number' => $quoteNumber,
-            'title' => $title,
+            'title' => null,
             'status' => 'submitted',
             'notes' => null,
             'submitted_at' => date('Y-m-d H:i:s'),
@@ -241,7 +233,7 @@ class ProjectIntakeController extends BaseApiController
                 }
 
                 $items[] = [
-                    'project_title' => $this->resolveProjectTitle($project),
+                    'project_title' => '',
                     'project_description' => trim((string) ($project['project_description'] ?? ($project['scope'] ?? ''))),
                     'estimated_amount' => $this->normalizeMoneyValue($project['estimated_amount'] ?? ($project['amount'] ?? null)),
                     'category_id' => $this->normalizeCategoryId($project),
@@ -262,10 +254,6 @@ class ProjectIntakeController extends BaseApiController
         }
 
         $singleTitle = trim((string) ($data['project_title'] ?? ''));
-        if ($singleTitle === '') {
-            return [];
-        }
-
         $items[] = [
             'project_title' => $singleTitle,
             'project_description' => trim((string) ($data['project_description'] ?? '')),
@@ -364,17 +352,6 @@ class ProjectIntakeController extends BaseApiController
         $errors = [];
 
         foreach ($projectItems as $index => $item) {
-            if ($item['project_title'] === '') {
-                $errors['projects.' . $index . '.project_title'] = 'Project title is required.';
-                continue;
-            }
-
-            $titleLength = mb_strlen($item['project_title']);
-            if ($titleLength < 3 || $titleLength > 190) {
-                $errors['projects.' . $index . '.project_title'] = 'Project title must be between 3 and 190 characters.';
-            }
-
-
             if ($item['plans_url'] !== '' && !$this->isValidPlansUrl($item['plans_url'])) {
                 $errors['projects.' . $index . '.plansUrl'] = 'Plans URL must be a valid URL.';
             }
@@ -1114,24 +1091,6 @@ class ProjectIntakeController extends BaseApiController
         }
 
         return array_values(array_unique($normalized));
-    }
-
-    /**
-     * @param array<string, mixed> $project
-     */
-    private function resolveProjectTitle(array $project): string
-    {
-        $title = trim((string) ($project['project_title'] ?? ''));
-        if ($title !== '') {
-            return $title;
-        }
-
-        $scope = trim((string) ($project['scope'] ?? ''));
-        if ($scope !== '') {
-            return mb_substr($scope, 0, 190);
-        }
-
-        return '';
     }
 
     /**

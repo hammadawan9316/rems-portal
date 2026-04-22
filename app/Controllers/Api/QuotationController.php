@@ -25,7 +25,7 @@ class QuotationController extends BaseApiController
 
         if ($projectItems === []) {
             return $this->res->badRequest('At least one project is required.', [
-                'projects' => 'Provide project_title or a projects array with one or more items.',
+                'projects' => 'Provide a projects array with one or more items.',
             ]);
         }
 
@@ -66,18 +66,12 @@ class QuotationController extends BaseApiController
             return $this->res->notFound('Customer not found.');
         }
 
-        $customerName = trim((string) ($customer['name'] ?? ''));
-        $requestedTitle = trim((string) ($data['title'] ?? ''));
-        $firstTitle = trim((string) ($projectItems[0]['project_title'] ?? ''));
-        $title = $requestedTitle !== ''
-            ? $requestedTitle
-            : ($firstTitle !== '' ? $firstTitle : 'Quotation for ' . ($customerName !== '' ? $customerName : ''));
         $quoteNumber = $quotationModel->generateQuoteNumber();
 
         $quotationPayload = [
             'customer_id' => $customerId,
             'quote_number' => $quoteNumber,
-            'title' => $title,
+            'title' => null,
             'status' => 'submitted',
             'notes' => null,
             'submitted_at' => date('Y-m-d H:i:s'),
@@ -348,14 +342,6 @@ class QuotationController extends BaseApiController
         $errors = [];
 
         foreach ($projectItems as $index => $item) {
-            if ($item['project_title'] === '') {
-                $errors['projects.' . $index . '.project_title'] = 'Project title is required.';
-            }
-
-            if (mb_strlen($item['project_title']) < 3 || mb_strlen($item['project_title']) > 190) {
-                $errors['projects.' . $index . '.project_title'] = 'Project title must be between 3 and 190 characters.';
-            }
-
             if ($item['deadline_date'] !== null && strtotime((string) $item['deadline_date']) === false) {
                 $errors['projects.' . $index . '.deadlineDate'] = 'Deadline date must be a valid date.';
             }
@@ -641,11 +627,6 @@ class QuotationController extends BaseApiController
     private function validateQuotationPayload(array $data): array
     {
         $errors = [];
-
-        $title = trim((string) ($data['title'] ?? ''));
-        if ($title === '' || mb_strlen($title) < 2 || mb_strlen($title) > 190) {
-            $errors['title'] = 'Quotation title is required and must be between 2 and 190 characters.';
-        }
 
         $customerId = isset($data['customer_id']) ? (int) $data['customer_id'] : 0;
         if ($customerId < 1) {

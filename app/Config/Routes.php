@@ -57,10 +57,12 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
             $routes->patch('customers/(:num)', 'CustomerController::update/$1');
             $routes->delete('customers/(:num)', 'CustomerController::delete/$1');
             $routes->get('quotations', 'QuotationController::index');
+            $routes->get('quotations/requested', 'QuotationController::requested');
             $routes->post('quotations', 'QuotationController::store');
             $routes->post('quotations/submit', 'QuotationController::submit');
             $routes->get('quotations/(:num)', 'QuotationController::show/$1');
             $routes->get('customers/(:num)/quotations', 'QuotationController::byCustomer/$1');
+            $routes->get('customers/(:num)/quotations/requested', 'QuotationController::requestedByCustomer/$1');
         });
     });
 

@@ -42,9 +42,10 @@ class QuotationModel extends Model
     /**
      * @return array{items:array<int, array<string, mixed>>, total:int}
      */
-    public function paginateQuotations(?int $customerId = null, string $search = '', int $perPage = 20, int $offset = 0): array
+    public function paginateQuotations(?int $customerId = null, string $search = '', int $perPage = 20, int $offset = 0, ?string $status = null): array
     {
         $search = trim($search);
+        $status = trim((string) $status);
 
         $countBuilder = $this->builder()
             ->select('COUNT(DISTINCT quotations.id) AS total', false)
@@ -52,6 +53,10 @@ class QuotationModel extends Model
 
         if ($customerId !== null && $customerId > 0) {
             $countBuilder->where('quotations.customer_id', $customerId);
+        }
+
+        if ($status !== '') {
+            $countBuilder->where('quotations.status', $status);
         }
 
         if ($search !== '') {
@@ -70,11 +75,15 @@ class QuotationModel extends Model
         $total = (int) ($totalRow['total'] ?? 0);
 
         $itemsBuilder = $this->builder()
-            ->select('quotations.*, customers.name AS customer_name, customers.email AS customer_email, customers.company AS customer_company')
+            ->select('quotations.*, customers.id AS customer_ref_id, customers.name AS customer_name, customers.email AS customer_email, customers.phone AS customer_phone, customers.company AS customer_company')
             ->join('customers', 'customers.id = quotations.customer_id', 'left');
 
         if ($customerId !== null && $customerId > 0) {
             $itemsBuilder->where('quotations.customer_id', $customerId);
+        }
+
+        if ($status !== '') {
+            $itemsBuilder->where('quotations.status', $status);
         }
 
         if ($search !== '') {

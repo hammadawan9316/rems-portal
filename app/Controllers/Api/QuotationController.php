@@ -13,6 +13,23 @@ use App\Libraries\SquareService;
 
 class QuotationController extends BaseApiController
 {
+    private const STATUS_REQUESTED = 'requested';
+    private const STATUS_PENDING = 'pending';
+    private const STATUS_ACCEPTED = 'accepted';
+    private const STATUS_REJECTED = 'rejected';
+    private const STATUS_COMPLETED = 'completed';
+
+    /**
+     * @var array<int, string>
+     */
+    private const ALLOWED_STATUSES = [
+        self::STATUS_REQUESTED,
+        self::STATUS_PENDING,
+        self::STATUS_ACCEPTED,
+        self::STATUS_REJECTED,
+        self::STATUS_COMPLETED,
+    ];
+
     public function store()
     {
         return $this->submit();
@@ -72,7 +89,7 @@ class QuotationController extends BaseApiController
             'customer_id' => $customerId,
             'quote_number' => $quoteNumber,
             'description' => $this->normalizeNullableText($data['description'] ?? ($data['title'] ?? null)),
-            'status' => 'submitted',
+            'status' => self::STATUS_PENDING,
             'notes' => $this->normalizeNullableText($data['notes'] ?? null),
             'submitted_at' => date('Y-m-d H:i:s'),
             'discount_type' => $this->normalizeDiscountType($data['discount_type'] ?? ($data['discountType'] ?? null)),
@@ -126,7 +143,7 @@ class QuotationController extends BaseApiController
         if (!is_array($quotation)) {
             $quotation = [];
         }
-        $quotation = $this->formatQuotationForResponse($quotation);
+        $quotation = $this->formatQuotationForResponse($quotation, $customer);
 
         $quotation['projects'] = $this->formatProjectsForResponse($createdProjects);
         $quotation['project_count'] = count($createdProjects);
@@ -136,13 +153,27 @@ class QuotationController extends BaseApiController
 
     public function index()
     {
-        $quotationModel = new QuotationModel();
         $params = $this->getListQueryParams();
         $customerId = (int) ($this->request->getGet('customer_id') ?? 0);
-        $result = $quotationModel->paginateQuotations($customerId > 0 ? $customerId : null, $params['search'], $params['perPage'], $params['offset']);
-        $items = array_map(fn (array $quotation): array => $this->formatQuotationForResponse($quotation), $result['items']);
+        $statusResult = $this->resolveStatusFilter($this->request->getGet('status'));
+        if (is_array($statusResult) && isset($statusResult['error'])) {
+            return $this->res->badRequest('Invalid quotation status filter.', [
+                'status' => (string) $statusResult['error'],
+            ]);
+        }
+        $status = is_string($statusResult) ? $statusResult : null;
 
-        return $this->res->paginated($items, $result['total'], $params['page'], $params['perPage'], 'Quotations retrieved successfully');
+        $result = $this->paginateFormattedQuotations($customerId > 0 ? $customerId : null, $params['search'], $params['perPage'], $params['offset'], $status);
+
+        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Quotations retrieved successfully');
+    }
+
+    public function requested()
+    {
+        $params = $this->getListQueryParams();
+        $result = $this->paginateFormattedQuotations(null, $params['search'], $params['perPage'], $params['offset'], self::STATUS_REQUESTED);
+
+        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Requested quotations retrieved successfully');
     }
 
     public function show(int $id)
@@ -152,7 +183,9 @@ class QuotationController extends BaseApiController
         if (!is_array($quotation)) {
             return $this->res->notFound('Quotation not found');
         }
-        $quotation = $this->formatQuotationForResponse($quotation);
+
+        $customer = model(CustomerModel::class)->find((int) ($quotation['customer_id'] ?? 0));
+        $quotation = $this->formatQuotationForResponse($quotation, is_array($customer) ? $customer : null);
 
         $projectModel = new ProjectModel();
 
@@ -175,12 +208,30 @@ class QuotationController extends BaseApiController
             return $this->res->badRequest('Valid customer id is required.');
         }
 
-        $quotationModel = new QuotationModel();
         $params = $this->getListQueryParams();
-        $result = $quotationModel->paginateQuotations($customerId, $params['search'], $params['perPage'], $params['offset']);
-        $items = array_map(fn (array $quotation): array => $this->formatQuotationForResponse($quotation), $result['items']);
+        $statusResult = $this->resolveStatusFilter($this->request->getGet('status'));
+        if (is_array($statusResult) && isset($statusResult['error'])) {
+            return $this->res->badRequest('Invalid quotation status filter.', [
+                'status' => (string) $statusResult['error'],
+            ]);
+        }
+        $status = is_string($statusResult) ? $statusResult : null;
 
-        return $this->res->paginated($items, $result['total'], $params['page'], $params['perPage'], 'Customer quotations retrieved successfully');
+        $result = $this->paginateFormattedQuotations($customerId, $params['search'], $params['perPage'], $params['offset'], $status);
+
+        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Customer quotations retrieved successfully');
+    }
+
+    public function requestedByCustomer(int $customerId)
+    {
+        if ($customerId < 1) {
+            return $this->res->badRequest('Valid customer id is required.');
+        }
+
+        $params = $this->getListQueryParams();
+        $result = $this->paginateFormattedQuotations($customerId, $params['search'], $params['perPage'], $params['offset'], self::STATUS_REQUESTED);
+
+        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Customer requested quotations retrieved successfully');
     }
 
     /**
@@ -613,13 +664,68 @@ class QuotationController extends BaseApiController
 
     /**
      * @param array<string, mixed> $quotation
+     * @param array<string, mixed>|null $customer
      * @return array<string, mixed>
      */
-    private function formatQuotationForResponse(array $quotation): array
+    private function formatQuotationForResponse(array $quotation, ?array $customer = null): array
     {
+        if ($customer === null) {
+            $customer = [
+                'id' => $quotation['customer_ref_id'] ?? $quotation['customer_id'] ?? null,
+                'name' => $quotation['customer_name'] ?? null,
+                'email' => $quotation['customer_email'] ?? null,
+                'phone' => $quotation['customer_phone'] ?? null,
+                'company' => $quotation['customer_company'] ?? null,
+            ];
+        }
+
+        $quotation['customer'] = [
+            'id' => (int) ($customer['id'] ?? 0) ?: null,
+            'name' => $this->normalizeNullableText($customer['name'] ?? null),
+            'email' => $this->normalizeNullableText($customer['email'] ?? null),
+            'phone' => $this->normalizeNullableText($customer['phone'] ?? null),
+            'company' => $this->normalizeNullableText($customer['company'] ?? null),
+        ];
+
         unset($quotation['title']);
+        unset($quotation['customer_ref_id'], $quotation['customer_name'], $quotation['customer_email'], $quotation['customer_phone'], $quotation['customer_company']);
 
         return $quotation;
+    }
+
+    /**
+     * @return array{items:array<int, array<string, mixed>>, total:int}
+     */
+    private function paginateFormattedQuotations(?int $customerId, string $search, int $perPage, int $offset, ?string $status): array
+    {
+        $quotationModel = new QuotationModel();
+        $result = $quotationModel->paginateQuotations($customerId, $search, $perPage, $offset, $status);
+        $result['items'] = array_map(fn (array $quotation): array => $this->formatQuotationForResponse($quotation), $result['items']);
+
+        return $result;
+    }
+
+    /**
+     * @return string|array{error:string}|null
+     */
+    private function resolveStatusFilter(mixed $status)
+    {
+        if ($status === null) {
+            return null;
+        }
+
+        $normalized = strtolower(trim((string) $status));
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (!in_array($normalized, self::ALLOWED_STATUSES, true)) {
+            return [
+                'error' => 'Allowed values: ' . implode(', ', self::ALLOWED_STATUSES) . '.',
+            ];
+        }
+
+        return $normalized;
     }
 
     private function normalizeDiscountScope(mixed $value): string

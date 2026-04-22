@@ -232,7 +232,7 @@ class SquareProjectQueueService
                 );
 
                 $this->quotationModel->update($quotationId, [
-                    'status' => 'estimate_draft_created',
+                    'status' => 'pending',
                     'square_order_id' => (string) ($estimate['order_id'] ?? null),
                     'square_invoice_id' => (string) ($estimate['estimate_id'] ?? null),
                     'square_status' => (string) ($estimate['status'] ?? null),
@@ -282,7 +282,7 @@ class SquareProjectQueueService
                 ]);
 
                 $this->quotationModel->update($quotationId, [
-                    'status' => 'square_failed',
+                    'status' => 'rejected',
                     'square_error' => $exception->getMessage(),
                 ]);
 

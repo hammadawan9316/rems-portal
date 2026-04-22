@@ -187,7 +187,7 @@ class ProjectIntakeController extends BaseApiController
             'customer_id' => $customerId,
             'quote_number' => $quoteNumber,
             'description' => $description !== '' ? $description : null,
-            'status' => 'submitted',
+            'status' => 'requested',
             'notes' => $notes !== '' ? $notes : null,
             'submitted_at' => date('Y-m-d H:i:s'),
         ]);

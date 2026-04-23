@@ -20,12 +20,12 @@ class AlterQuotationStatusToEnum extends Migration
             . "    WHEN `status` = 'accepted' THEN 'accepted'\n"
             . "    WHEN `status` = 'rejected' THEN 'rejected'\n"
             . "    WHEN `status` = 'completed' THEN 'completed'\n"
-            . "    WHEN `status` = 'square_failed' THEN 'rejected'\n"
+            . "    WHEN `status` = 'square_failed' THEN 'square_failed'\n"
             . "    ELSE 'pending'\n"
             . "END"
         );
 
-        $this->db->query("ALTER TABLE `quotations` MODIFY COLUMN `status` ENUM('requested','pending','accepted','rejected','completed') NOT NULL DEFAULT 'requested'");
+        $this->db->query("ALTER TABLE `quotations` MODIFY COLUMN `status` ENUM('requested','pending','accepted','rejected','completed','square_failed') NOT NULL DEFAULT 'requested'");
     }
 
     public function down()

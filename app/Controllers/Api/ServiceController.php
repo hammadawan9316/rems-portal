@@ -60,7 +60,6 @@ class ServiceController extends BaseApiController
         if ($validCategoryIds === []) {
             return $this->res->badRequest('Category not found.', ['category_ids' => 'At least one valid category is required.']);
         }
-
         $serviceModel = new ServiceModel();
         $slug = $this->resolveSlug((string) ($data['slug'] ?? ''), (string) $data['name']);
         if ($serviceModel->findBySlug($slug) !== null) {

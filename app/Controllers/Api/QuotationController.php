@@ -18,6 +18,7 @@ class QuotationController extends BaseApiController
     private const STATUS_ACCEPTED = 'accepted';
     private const STATUS_REJECTED = 'rejected';
     private const STATUS_COMPLETED = 'completed';
+    private const STATUS_SQUARE_FAILED = 'square_failed';
 
     /**
      * @var array<int, string>
@@ -28,6 +29,7 @@ class QuotationController extends BaseApiController
         self::STATUS_ACCEPTED,
         self::STATUS_REJECTED,
         self::STATUS_COMPLETED,
+        self::STATUS_SQUARE_FAILED,
     ];
 
     public function store()
@@ -149,6 +151,164 @@ class QuotationController extends BaseApiController
         $quotation['project_count'] = count($createdProjects);
 
         return $this->res->created($quotation, 'Quotation created successfully from projects.');
+    }
+
+    public function update(int $id)
+    {
+        $quotationModel = new QuotationModel();
+        $projectModel = new ProjectModel();
+        $projectServiceModel = new ProjectServiceModel();
+        $customerModel = new CustomerModel();
+
+        $quotation = $quotationModel->find($id);
+        if (!is_array($quotation)) {
+            return $this->res->notFound('Quotation not found');
+        }
+
+        $data = $this->normalizeIncomingPayload($this->getRequestData(false));
+        $quotationPayload = [];
+
+        if (array_key_exists('customer_id', $data)) {
+            $customerId = (int) ($data['customer_id'] ?? 0);
+            if ($customerId < 1) {
+                return $this->res->badRequest('Customer id is required.', [
+                    'customer_id' => 'A valid customer id is required.',
+                ]);
+            }
+
+            $customer = $customerModel->find($customerId);
+            if (!is_array($customer)) {
+                return $this->res->notFound('Customer not found.');
+            }
+
+            $quotationPayload['customer_id'] = $customerId;
+        }
+
+        if (array_key_exists('description', $data) || array_key_exists('title', $data)) {
+            $quotationPayload['description'] = $this->normalizeNullableText($data['description'] ?? ($data['title'] ?? null));
+        }
+
+        if (array_key_exists('status', $data)) {
+            $statusResult = $this->resolveStatusFilter($data['status']);
+            if (is_array($statusResult) && isset($statusResult['error'])) {
+                return $this->res->badRequest('Invalid quotation status.', [
+                    'status' => (string) $statusResult['error'],
+                ]);
+            }
+
+            $quotationPayload['status'] = is_string($statusResult) ? $statusResult : self::STATUS_PENDING;
+        }
+
+        if (array_key_exists('notes', $data)) {
+            $quotationPayload['notes'] = $this->normalizeNullableText($data['notes']);
+        }
+
+        if (array_key_exists('discount_type', $data) || array_key_exists('discountType', $data)) {
+            $quotationPayload['discount_type'] = $this->normalizeDiscountType($data['discount_type'] ?? ($data['discountType'] ?? null));
+        }
+
+        if (array_key_exists('discount_value', $data) || array_key_exists('discountValue', $data)) {
+            $quotationPayload['discount_value'] = $this->normalizeDecimalValue($data['discount_value'] ?? ($data['discountValue'] ?? null));
+        }
+
+        if (array_key_exists('discount_scope', $data) || array_key_exists('discountScope', $data)) {
+            $quotationPayload['discount_scope'] = $this->normalizeDiscountScope($data['discount_scope'] ?? ($data['discountScope'] ?? null));
+        }
+
+        $shouldReplaceProjects = isset($data['projects']) || $this->looksLikeProjectPayload($data);
+        $projectItems = [];
+
+        if ($shouldReplaceProjects) {
+            $projectItems = $this->extractProjectItems($data);
+            if ($projectItems === []) {
+                return $this->res->badRequest('At least one project is required.', [
+                    'projects' => 'Provide a projects array with one or more items.',
+                ]);
+            }
+
+            $projectErrors = $this->validateProjectItems($projectItems);
+            if ($projectErrors !== []) {
+                return $this->res->validation($projectErrors);
+            }
+
+            $taxonomyResolution = $this->resolveProjectTaxonomy($projectItems);
+            if (($taxonomyResolution['errors'] ?? []) !== []) {
+                return $this->res->validation($taxonomyResolution['errors']);
+            }
+
+            $projectItems = $taxonomyResolution['projects'] ?? $projectItems;
+        }
+
+        if ($quotationPayload === [] && !$shouldReplaceProjects) {
+            return $this->res->badRequest('No quotation fields supplied to update.');
+        }
+
+        if ($quotationPayload !== []) {
+            $quotationModel->update($id, $quotationPayload);
+        }
+
+        $effectiveCustomerId = (int) ($quotationPayload['customer_id'] ?? ($quotation['customer_id'] ?? 0));
+        $customer = $customerModel->find($effectiveCustomerId);
+        if (!is_array($customer)) {
+            return $this->res->notFound('Customer not found.');
+        }
+
+        if ($shouldReplaceProjects) {
+            $existingProjects = $projectModel
+                ->where('quotation_id', $id)
+                ->orderBy('id', 'ASC')
+                ->findAll();
+
+            $existingProjectIds = array_map(static fn (array $project): int => (int) ($project['id'] ?? 0), $existingProjects);
+            $existingProjectIds = array_values(array_filter($existingProjectIds, static fn (int $projectId): bool => $projectId > 0));
+
+            if ($existingProjectIds !== []) {
+                $projectServiceModel->whereIn('project_id', $existingProjectIds)->delete();
+            }
+
+            $projectModel->where('quotation_id', $id)->delete();
+
+            foreach ($projectItems as $item) {
+                $projectData = [
+                    'customer_id' => $effectiveCustomerId,
+                    'quotation_id' => $id,
+                    'category_id' => (int) ($item['category_id'] ?? 0) ?: null,
+                    'project_title' => $item['project_title'],
+                    'project_description' => $item['project_description'],
+                    'scope' => $item['scope'],
+                    'estimate_type' => $item['estimate_type'],
+                    'plans_url' => null,
+                    'zip_code' => $item['zip_code'],
+                    'deadline' => $item['deadline'],
+                    'delivery_date' => $item['delivery_date'],
+                    'deadline_date' => $item['deadline_date'],
+                    'estimated_amount' => $item['estimated_amount'],
+                    'payment_type' => $item['payment_type'],
+                    'hourly_hours' => $item['hourly_hours'],
+                    'status' => 'submitted',
+                ];
+
+                $projectModel->insert($projectData);
+                $projectId = (int) $projectModel->getInsertID();
+                $projectServiceModel->replaceServices($projectId, is_array($item['service_ids'] ?? null) ? $item['service_ids'] : []);
+            }
+        }
+
+        $updatedQuotation = $quotationModel->find($id);
+        if (!is_array($updatedQuotation)) {
+            return $this->res->notFound('Quotation not found');
+        }
+
+        $updatedProjects = $projectModel
+            ->where('quotation_id', $id)
+            ->orderBy('id', 'ASC')
+            ->findAll();
+
+        $updatedQuotation = $this->formatQuotationForResponse($updatedQuotation, $customer);
+        $updatedQuotation['projects'] = $this->formatProjectsForResponse($updatedProjects);
+        $updatedQuotation['project_count'] = count($updatedProjects);
+
+        return $this->res->ok($updatedQuotation, 'Quotation updated successfully');
     }
 
     public function index()

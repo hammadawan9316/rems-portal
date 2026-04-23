@@ -282,7 +282,7 @@ class SquareProjectQueueService
                 ]);
 
                 $this->quotationModel->update($quotationId, [
-                    'status' => 'rejected',
+                    'status' => 'square_failed',
                     'square_error' => $exception->getMessage(),
                 ]);
 

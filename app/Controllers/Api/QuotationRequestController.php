@@ -17,17 +17,23 @@ class QuotationRequestController extends BaseApiController
     public function index()
     {
         $params = $this->getListQueryParams();
+
+        $page       = $params['page']       ?? 1;
+        $perPage    = $params['perPage']    ?? 10;
+        $sortBy     = $params['sort_by']    ?? 'id';
+        $sortOrder  = $params['sort_order'] ?? 'DESC';
+        $search     = $params['search']     ?? null;
+
         $requests = (new QuotationRequestModel())
-            ->getAllQuotationRequests($params['page'], $params['perPage'], $params['sort_by'], $params['sort_order'], $params['search']);
+            ->getAllQuotationRequests($page, $perPage, $sortBy, $sortOrder, $search);
 
         return $this->res->paginated(
             $requests['items'],
             $requests['total'],
-            $params['page'],
-            $params['perPage']
+            $page,
+            $perPage
         );
     }
-
     public function show(int $id)
     {
         $requestModel = new QuotationRequestModel();

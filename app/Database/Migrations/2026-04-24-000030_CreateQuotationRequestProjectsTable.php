@@ -27,8 +27,8 @@ class CreateQuotationRequestProjectsTable extends Migration
                 'default' => 0,
             ],
             'category_id' => [
-                'type' => 'BIGINT',
-                'constraint' => 20,
+                'type' => 'INT',
+                'constraint' => 11,
                 'unsigned' => true,
                 'null' => true,
             ],
@@ -113,7 +113,7 @@ class CreateQuotationRequestProjectsTable extends Migration
         $this->forge->addKey('category_id');
         $this->forge->addKey(['quotation_request_id', 'request_project_index']);
         $this->forge->addForeignKey('quotation_request_id', 'quotation_requests', 'id', 'CASCADE', 'CASCADE', 'fk_qr_projects_request_id');
-        $this->forge->addForeignKey('category_id', 'categories', 'id', 'SET NULL', 'CASCADE', 'fk_qr_projects_category_id');
+        $this->forge->addForeignKey('category_id', 'categories', 'id', 'CASCADE', 'SET NULL', 'fk_qr_projects_category_id');
         $this->forge->createTable('quotation_request_projects', true);
     }
 

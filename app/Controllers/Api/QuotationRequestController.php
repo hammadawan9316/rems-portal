@@ -18,13 +18,13 @@ class QuotationRequestController extends BaseApiController
     {
         $params = $this->getListQueryParams();
         $requests = (new QuotationRequestModel())
-            ->getAllQuotationRequests($params['page'], $params['per_page'], $params['sort_by'], $params['sort_order'], $params['search']);
+            ->getAllQuotationRequests($params['page'], $params['perPage'], $params['sort_by'], $params['sort_order'], $params['search']);
 
         return $this->res->paginated(
             $requests['items'],
             $requests['total'],
             $params['page'],
-            $params['per_page']
+            $params['perPage']
         );
     }
 

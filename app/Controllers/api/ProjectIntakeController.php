@@ -2,14 +2,13 @@
 
 namespace App\Controllers\Api;
 
-use App\Libraries\SquareProjectQueueService;
-use App\Libraries\SquareService;
 use App\Models\CategoryModel;
 use App\Models\CustomerModel;
 use App\Models\ProjectFileModel;
 use App\Models\ProjectModel;
 use App\Models\ProjectServiceModel;
-use App\Models\QuotationModel;
+use App\Models\QuotationRequestModel;
+use App\Models\QuotationRequestProjectModel;
 use App\Models\ServiceModel;
 use CodeIgniter\HTTP\Files\UploadedFile;
 use Config\Square;
@@ -19,7 +18,8 @@ class ProjectIntakeController extends BaseApiController
     public function submit()
     {
         $data = $this->normalizeIncomingPayload($this->getRequestData(false));
-        $projectItems = $this->extractProjectItems($data);
+        $rawProjectItems = $this->extractProjectItems($data);
+        $projectItems = $rawProjectItems;
         $projectCount = count($projectItems);
 
         if ($projectItems === []) {
@@ -52,14 +52,10 @@ class ProjectIntakeController extends BaseApiController
         $uploadedFilesByProject = $uploadedFilesResult['by_project'] ?? [];
         $uploadedFiles = $uploadedFilesResult['all'] ?? [];
 
-        $projectModel = new ProjectModel();
-        $projectServiceModel = new ProjectServiceModel();
         $customerModel = new CustomerModel();
-        $quotationModel = new QuotationModel();
+        $quotationRequestModel = new QuotationRequestModel();
+        $quotationRequestProjectModel = new QuotationRequestProjectModel();
         $projectFileModel = new ProjectFileModel();
-        $squareQueue = new SquareProjectQueueService();
-        $square = new SquareService();
-        $isSquareConfigured = $square->isConfigured();
 
         $clientName = trim((string) ($data['client_name'] ?? ''));
         $clientEmail = trim((string) ($data['client_email'] ?? ''));
@@ -67,21 +63,32 @@ class ProjectIntakeController extends BaseApiController
         $company = trim((string) ($data['company'] ?? ''));
         $customerId = $this->resolveCustomerId($customerModel, $clientName, $clientEmail, $clientPhone, $company);
 
-        $quotationId = $this->createQuotation(
-            $quotationModel,
+        $requestId = $this->createQuotationRequest(
+            $quotationRequestModel,
             $customerId,
-            $data
+            $data,
+            [
+                'request' => $data,
+                'projects' => $projectItems,
+            ]
         );
 
-        $createdProjects = [];
+        $requestRow = $requestId !== null ? $quotationRequestModel->find($requestId) : null;
+        $requestNumber = is_array($requestRow) ? trim((string) ($requestRow['request_number'] ?? '')) : '';
+
+        if ($requestId === null) {
+            return $this->res->serverError('Quotation request could not be created.');
+        }
+
+        $createdRequestProjects = [];
         $squareResults = [];
         $secureFiles = [];
-        $projectsByFile = [];  // Track files by project for quotation email
+        $projectsByFile = [];
 
         foreach ($projectItems as $index => $item) {
-            $projectData = [
-                'customer_id' => $customerId,
-                'quotation_id' => $quotationId,
+            $requestProjectData = [
+                'quotation_request_id' => $requestId,
+                'request_project_index' => $index,
                 'category_id' => (int) ($item['category_id'] ?? 0) ?: null,
                 'project_title' => $item['project_title'],
                 'project_description' => $item['project_description'],
@@ -95,12 +102,12 @@ class ProjectIntakeController extends BaseApiController
                 'estimated_amount' => $item['estimated_amount'],
                 'payment_type' => $item['payment_type'],
                 'hourly_hours' => $item['hourly_hours'],
-                'status' => 'submitted',
+                'service_ids_json' => json_encode(is_array($item['service_ids'] ?? null) ? $item['service_ids'] : [], JSON_UNESCAPED_SLASHES),
+                'raw_payload' => json_encode($rawProjectItems[$index] ?? $item, JSON_UNESCAPED_SLASHES),
             ];
 
-            $projectModel->insert($projectData);
-            $projectId = (int) $projectModel->getInsertID();
-            $projectServiceModel->replaceServices($projectId, is_array($item['service_ids'] ?? null) ? $item['service_ids'] : []);
+            $quotationRequestProjectModel->insert($requestProjectData);
+            $requestProjectId = (int) $quotationRequestProjectModel->getInsertID();
 
             $projectUploadedFiles = [];
             if (isset($uploadedFilesByProject[$index]) && is_array($uploadedFilesByProject[$index])) {
@@ -109,90 +116,92 @@ class ProjectIntakeController extends BaseApiController
 
             $projectSecureFiles = $this->attachProjectFiles(
                 $projectFileModel,
-                $projectId,
-                $projectUploadedFiles
+                null,
+                $projectUploadedFiles,
+                $requestId,
+                $index
             );
             $secureFiles = array_merge($secureFiles, $projectSecureFiles);
-            $projectsByFile[$projectId] = $projectSecureFiles;
+            $projectsByFile[$index] = $projectSecureFiles;
 
-            $squareResult = [
-                'configured' => $isSquareConfigured,
-                'customer_id' => null,
-                'estimate_id' => null,
-                'order_id' => null,
-                'status' => $isSquareConfigured ? 'queued' : 'skipped',
-            ];
-
-            $savedProject = $projectModel->find($projectId);
-            if (is_array($savedProject)) {
-                $createdProjects[] = $savedProject;
+            $savedRequestProject = $quotationRequestProjectModel->find($requestProjectId);
+            if (is_array($savedRequestProject)) {
+                $savedRequestProject['category'] = (string) ($item['category'] ?? '');
+                $savedRequestProject['services'] = is_array($item['services'] ?? null) ? $item['services'] : [];
+                $savedRequestProject['service_ids'] = is_array($item['service_ids'] ?? null) ? $item['service_ids'] : [];
+                $createdRequestProjects[] = $savedRequestProject;
             }
-            $squareResults[] = array_merge(['project_id' => $projectId], $squareResult);
+
+            $squareResults[] = [
+                'request_project_id' => $requestProjectId,
+                'status' => 'deferred',
+            ];
         }
 
-        if ($isSquareConfigured && $quotationId !== null) {
-            $squareQueue->enqueue($quotationId);
-        }
-
-        $createdProjects = $this->formatProjectsForResponse($createdProjects);
-
-        // Send quotation-based owner notification (consolidated for all projects)
-        $this->queueOwnerNotificationForQuotation(
-            $quotationId,
-            $createdProjects,
+        $this->queueOwnerNotificationForRequest(
+            $requestId,
+            $requestNumber,
+            $createdRequestProjects,
             $projectsByFile,
             $clientName,
             $clientEmail,
             $squareResults
         );
 
-        $this->queueCustomerSubmittedNotification($clientEmail, $clientName, $quotationId, $createdProjects, $secureFiles);
+        $this->queueCustomerSubmittedNotification($clientEmail, $clientName, $requestId, $requestNumber, $createdRequestProjects, $secureFiles);
 
         $isMultiple = count($projectItems) > 1;
-        $singleProject = $createdProjects[0] ?? null;
+        $singleProject = $createdRequestProjects[0] ?? null;
         $singleSquare = $squareResults[0] ?? null;
 
         return $this->res->created([
-            'quotation_id' => $quotationId,
+            'request_id' => $requestId,
+            'request_number' => $requestNumber,
+            'quotation_id' => null,
             'project' => $singleProject,
             'square' => $singleSquare,
-            'projects' => $createdProjects,
+            'projects' => $createdRequestProjects,
             'square_results' => $squareResults,
-            'project_count' => count($createdProjects),
+            'project_count' => count($createdRequestProjects),
             'multiple_projects' => $isMultiple,
             'files' => $uploadedFiles,
             'files_by_project' => $uploadedFilesByProject,
             'secure_files' => $secureFiles,
             'sequence' => [
-                'project_created_first' => true,
-                'estimate_created_after_project' => true,
-                'square_processing' => 'queued_for_cron',
+                'request_created' => true,
+                'quotation_created' => false,
+                'square_processing' => 'deferred_until_admin_action',
             ],
-        ], 'Project submitted successfully. Square sync queued for background processing.');
+        ], 'Quotation request submitted successfully. Admin quotation and Square sync are deferred.');
     }
 
     /**
      * @param array<int, array<string, mixed>> $projectItems
      */
-    private function createQuotation(
-        QuotationModel $quotationModel,
+    private function createQuotationRequest(
+        QuotationRequestModel $quotationRequestModel,
         ?int $customerId,
-        array $data
+        array $data,
+        array $snapshot
     ): ?int {
-        $quoteNumber = $quotationModel->generateQuoteNumber();
+        $requestNumber = $quotationRequestModel->generateRequestNumber();
         $description = trim((string) ($data['description'] ?? ($data['title'] ?? '')));
         $notes = trim((string) ($data['notes'] ?? ''));
 
-        $quotationModel->insert([
+        $quotationRequestModel->insert([
             'customer_id' => $customerId,
-            'quote_number' => $quoteNumber,
+            'request_number' => $requestNumber,
+            'client_name' => trim((string) ($data['client_name'] ?? '')),
+            'client_email' => trim((string) ($data['client_email'] ?? '')),
+            'client_phone' => trim((string) ($data['client_phone'] ?? '')),
+            'company' => trim((string) ($data['company'] ?? '')),
             'description' => $description !== '' ? $description : null,
             'status' => 'requested',
             'notes' => $notes !== '' ? $notes : null,
-            'submitted_at' => date('Y-m-d H:i:s'),
+            'payload_snapshot' => json_encode($snapshot, JSON_UNESCAPED_SLASHES),
         ]);
 
-        $id = (int) $quotationModel->getInsertID();
+        $id = (int) $quotationRequestModel->getInsertID();
 
         return $id > 0 ? $id : null;
     }
@@ -560,17 +569,19 @@ class ProjectIntakeController extends BaseApiController
     }
 
     /**
-     * Send quotation-based notification to owner/admin with all projects
+     * Send request-based notification to owner/admin with all projects
      *
-     * @param int|null $quotationId
+     * @param int|null $requestId
+     * @param string $requestNumber
      * @param array<int, array<string, mixed>> $projects
      * @param array<int, array<int, array<string, mixed>>> $projectsByFile
      * @param string $clientName
      * @param string $clientEmail
      * @param array<int, array<string, mixed>> $squareResults
      */
-    private function queueOwnerNotificationForQuotation(
-        ?int $quotationId,
+    private function queueOwnerNotificationForRequest(
+        ?int $requestId,
+        string $requestNumber,
         array $projects,
         array $projectsByFile,
         string $clientName,
@@ -580,28 +591,21 @@ class ProjectIntakeController extends BaseApiController
         /** @var Square $squareConfig */
         $squareConfig = config('Square');
         $to = trim($squareConfig->ownerNotificationEmail);
-        if ($to === '' || $quotationId === null) {
+        if ($to === '' || $requestId === null) {
             return;
         }
 
         $projectCount = count($projects);
-        $quotationModel = new QuotationModel();
-        $quotation = $quotationModel->find($quotationId);
-
-        $quotationNumber = '';
-        if (is_array($quotation)) {
-            $quotationNumber = (string) ($quotation['quote_number'] ?? '');
-        }
 
         $contentParts = [
-            '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">A new quotation with ' . esc((string) $projectCount) . ' project(s) was submitted from the website.</p>',
+            '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">A new quotation request with ' . esc((string) $projectCount) . ' project(s) was submitted from the website.</p>',
             
-            // Quotation Header
+            // Request Header
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse;">',
-            '<tr><td style="padding:12px;background:#0f172a;"><strong style="color:#ffffff;">Quotation Details</strong></td></tr>',
+            '<tr><td style="padding:12px;background:#0f172a;"><strong style="color:#ffffff;">Request Details</strong></td></tr>',
             '<tr><td style="padding:12px;">',
-            ($quotationNumber !== '' ? '<strong>Quote Number:</strong> ' . esc($quotationNumber) . '<br>' : ''),
-            '<strong>Quote ID:</strong> #' . esc((string) $quotationId) . '<br>',
+            ($requestNumber !== '' ? '<strong>Request Number:</strong> ' . esc($requestNumber) . '<br>' : ''),
+            '<strong>Request ID:</strong> #' . esc((string) $requestId) . '<br>',
             '<strong>Total Projects:</strong> ' . esc((string) $projectCount) . '<br>',
             '<strong>Submitted:</strong> ' . date('F j, Y \a\t g:i A') . '<br>',
             '</td></tr>',
@@ -641,7 +645,7 @@ class ProjectIntakeController extends BaseApiController
 
             // Project card
             $contentParts[] = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;">';
-            $contentParts[] = '<tr><td style="padding:12px;background:#0f172a;"><strong style="color:#ffffff;">Project #' . esc((string) $projectId) . ': ' . esc($projectTitle) . '</strong></td></tr>';
+            $contentParts[] = '<tr><td style="padding:12px;background:#0f172a;"><strong style="color:#ffffff;">Request Project #' . esc((string) ($projectId > 0 ? $projectId : ((int) ($project['request_project_index'] ?? 0)))) . ': ' . esc($projectTitle) . '</strong></td></tr>';
             $contentParts[] = '<tr><td style="padding:12px;">';
 
             // Project basic info
@@ -691,7 +695,8 @@ class ProjectIntakeController extends BaseApiController
             }
 
             // Project files if any
-            $projectFiles = $projectsByFile[$projectId] ?? [];
+            $projectIndex = (int) ($project['request_project_index'] ?? 0);
+            $projectFiles = $projectsByFile[$projectIndex] ?? [];
             if ($projectFiles !== []) {
                 $contentParts[] = '<p style="margin:12px 0 8px 0;"><strong style="color:#0f172a;">Uploaded Files (' . count($projectFiles) . ')</strong></p>';
                 foreach ($projectFiles as $file) {
@@ -720,32 +725,29 @@ class ProjectIntakeController extends BaseApiController
 
         // Square Status Summary
         $squareStatuses = array_column($squareResults, 'status');
-        $queuedCount = count(array_filter($squareStatuses, static fn ($s) => $s === 'queued'));
-        $skippedCount = count(array_filter($squareStatuses, static fn ($s) => $s === 'skipped'));
+        $deferredCount = count(array_filter($squareStatuses, static fn ($s) => $s === 'deferred'));
 
         $contentParts[] = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse;">';
         $contentParts[] = '<tr><td style="padding:12px;background:#f8fafc;border-left:3px solid #0f172a;"><strong style="color:#0f172a;">Square Integration Status</strong></td></tr>';
         $contentParts[] = '<tr><td style="padding:12px;">';
-        if ($queuedCount > 0) {
-            $contentParts[] = '<p style="margin:0 0 6px 0;"><strong>Queued for Processing:</strong> <span style="background:#d1fae5;padding:4px 8px;border-radius:4px;color:#065f46;">' . esc((string) $queuedCount) . ' project(s)</span></p>';
-        }
-        if ($skippedCount > 0) {
-            $contentParts[] = '<p style="margin:0;"><strong>Skipped:</strong> <span style="background:#fee2e2;padding:4px 8px;border-radius:4px;color:#7f1d1d;">' . esc((string) $skippedCount) . ' project(s)</span></p>';
+        if ($deferredCount > 0) {
+            $contentParts[] = '<p style="margin:0;"><strong>Deferred:</strong> <span style="background:#e0f2fe;padding:4px 8px;border-radius:4px;color:#075985;">' . esc((string) $deferredCount) . ' project(s) awaiting admin quotation/invoice action</span></p>';
         }
         $contentParts[] = '</td></tr>';
         $contentParts[] = '</table>';
 
         $emailQueue = service('emailQueue');
+        $subject = 'New Quotation Request - ' . ($requestNumber !== '' ? $requestNumber : '#' . $requestId);
         $body = $emailQueue->renderTemplate([
-            'subject' => 'New Quotation Submission - ' . ($quotationNumber !== '' ? $quotationNumber : '#' . $quotationId),
+            'subject' => $subject,
             'recipientName' => 'Admin',
-            'headline' => 'New Quotation Submission Received',
+            'headline' => 'New Quotation Request Received',
             'contentHtml' => implode('', $contentParts),
             'actionText' => 'Review in Dashboard',
-            'actionUrl' => base_url('dashboard/quotations/' . $quotationId),
+            'actionUrl' => base_url('dashboard/quotation-requests/' . $requestId),
         ]);
 
-        queue_email_job($to, 'New Quotation Submission - ' . ($quotationNumber !== '' ? $quotationNumber : '#' . $quotationId), $body, [
+        queue_email_job($to, $subject, $body, [
             'mail_type' => 'html',
         ]);
     }
@@ -756,7 +758,8 @@ class ProjectIntakeController extends BaseApiController
     private function queueCustomerSubmittedNotification(
         string $email,
         string $name,
-        ?int $quotationId,
+        ?int $requestId,
+        string $requestNumber,
         array $projects,
         array $secureFiles
     ): void
@@ -768,14 +771,6 @@ class ProjectIntakeController extends BaseApiController
 
         $projectCount = count($projects);
         $recipientName = $name === '' ? 'Customer' : $name;
-        $quotationNumber = '';
-
-        if ($quotationId !== null) {
-            $quotation = (new QuotationModel())->find($quotationId);
-            if (is_array($quotation)) {
-                $quotationNumber = trim((string) ($quotation['quote_number'] ?? ''));
-            }
-        }
 
         // Build comprehensive project details for customer
         $projectsHtml = '';
@@ -851,22 +846,21 @@ class ProjectIntakeController extends BaseApiController
         }
 
         $contentHtml = '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">Thank you for submitting your quotation request. We have received it and our team is reviewing your projects.</p>'
-            . ($quotationId !== null ? '<p style="margin:14px 0 6px 0;font-size:15px;line-height:1.6;"><strong>Quotation ID:</strong> #' . esc((string) $quotationId) . '</p>' : '')
-            . ($quotationNumber !== '' ? '<p style="margin:6px 0 14px 0;font-size:15px;line-height:1.6;"><strong>Quote Number:</strong> ' . esc($quotationNumber) . '</p>' : '')
+            . ($requestId !== null ? '<p style="margin:14px 0 6px 0;font-size:15px;line-height:1.6;"><strong>Request ID:</strong> #' . esc((string) $requestId) . '</p>' : '')
+            . ($requestNumber !== '' ? '<p style="margin:6px 0 14px 0;font-size:15px;line-height:1.6;"><strong>Request Number:</strong> ' . esc($requestNumber) . '</p>' : '')
             . '<p style="margin:14px 0;font-size:15px;line-height:1.6;"><strong>Total Projects Submitted:</strong> ' . esc((string) $projectCount) . '</p>'
             . '<div style="margin:20px 0;">' . $projectsHtml . '</div>'
             . $fileLinksHtml
             . '<p style="margin:20px 0 0 0;font-size:14px;color:#6b7280;line-height:1.6;">You will receive updates as we process your request. If you have any questions, please don\'t hesitate to reach out to us.</p>';
 
         $emailQueue = service('emailQueue');
-        $subject = 'Quotation submission received' . ($quotationNumber !== '' ? ' - ' . $quotationNumber : ($quotationId !== null ? ' #' . $quotationId : ''));
+        $subject = 'Quotation request received' . ($requestNumber !== '' ? ' - ' . $requestNumber : ($requestId !== null ? ' #' . $requestId : ''));
         $body = $emailQueue->renderTemplate([
             'subject' => $subject,
             'recipientName' => $recipientName,
-            'headline' => 'We received your quotation request',
+            'headline' => 'We received your request',
             'contentHtml' => $contentHtml,
-            'actionText' => 'View Your Quotation',
-            'actionUrl' => $quotationId !== null ? base_url('customer/quotations/' . $quotationId) : base_url('customer/projects'),
+        
         ]);
 
         queue_email_job($to, $subject, $body, ['mail_type' => 'html']);
@@ -876,7 +870,13 @@ class ProjectIntakeController extends BaseApiController
      * @param array<int, array<string, mixed>> $uploadedFiles
      * @return array<int, array<string, mixed>>
      */
-    private function attachProjectFiles(ProjectFileModel $projectFileModel, int $projectId, array $uploadedFiles): array
+    private function attachProjectFiles(
+        ProjectFileModel $projectFileModel,
+        ?int $projectId,
+        array $uploadedFiles,
+        ?int $quotationRequestId = null,
+        ?int $requestProjectIndex = null
+    ): array
     {
         $files = [];
 
@@ -890,6 +890,8 @@ class ProjectIntakeController extends BaseApiController
             $token = bin2hex(random_bytes(20));
             $row = [
                 'project_id' => $projectId,
+                'quotation_request_id' => $quotationRequestId,
+                'request_project_index' => $requestProjectIndex,
                 'original_name' => (string) ($uploadedFile['original_name'] ?? 'file'),
                 'stored_name' => (string) ($uploadedFile['stored_name'] ?? ''),
                 'mime_type' => (string) ($uploadedFile['mime_type'] ?? ''),
@@ -903,6 +905,8 @@ class ProjectIntakeController extends BaseApiController
             $projectFileModel->insert($row);
             $files[] = [
                 'project_id' => $projectId,
+                'quotation_request_id' => $quotationRequestId,
+                'request_project_index' => $requestProjectIndex,
                 'original_name' => $row['original_name'],
                 'mime_type' => $row['mime_type'],
                 'size_kb' => $row['size_kb'],

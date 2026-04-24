@@ -69,9 +69,6 @@ class QuotationController extends BaseApiController
         $projectModel = new ProjectModel();
         $projectServiceModel = new ProjectServiceModel();
         $customerModel = new CustomerModel();
-        $squareQueue = new SquareProjectQueueService();
-        $square = new SquareService();
-        $isSquareConfigured = $square->isConfigured();
 
         $customerId = (int) ($data['customer_id'] ?? 0);
         if ($customerId < 1) {
@@ -137,10 +134,6 @@ class QuotationController extends BaseApiController
             }
         }
 
-        if ($isSquareConfigured) {
-            $squareQueue->enqueue($quotationId);
-        }
-
         $quotation = $quotationModel->find($quotationId);
         if (!is_array($quotation)) {
             $quotation = [];
@@ -150,7 +143,48 @@ class QuotationController extends BaseApiController
         $quotation['projects'] = $this->formatProjectsForResponse($createdProjects);
         $quotation['project_count'] = count($createdProjects);
 
-        return $this->res->created($quotation, 'Quotation created successfully from projects.');
+        return $this->res->created($quotation, 'Quotation created successfully from projects. Square invoice creation is deferred until explicitly requested by admin.');
+    }
+
+    public function createSquareInvoice(int $id)
+    {
+        $quotationModel = new QuotationModel();
+        $projectModel = new ProjectModel();
+        $squareQueue = new SquareProjectQueueService();
+        $square = new SquareService();
+
+        $quotation = $quotationModel->find($id);
+        if (!is_array($quotation)) {
+            return $this->res->notFound('Quotation not found');
+        }
+
+        if (!$square->isConfigured()) {
+            return $this->res->badRequest('Square integration is not configured.');
+        }
+
+        $projects = $projectModel
+            ->where('quotation_id', $id)
+            ->orderBy('id', 'ASC')
+            ->findAll();
+
+        if ($projects === []) {
+            return $this->res->badRequest('Cannot create Square invoice for a quotation without projects.');
+        }
+
+        $existingInvoiceId = trim((string) ($quotation['square_invoice_id'] ?? ''));
+        if ($existingInvoiceId !== '') {
+            return $this->res->badRequest('Square invoice is already linked to this quotation.', [
+                'square_invoice_id' => $existingInvoiceId,
+            ]);
+        }
+
+        $jobId = $squareQueue->enqueue($id);
+
+        return $this->res->ok([
+            'quotation_id' => $id,
+            'queue_job_id' => $jobId,
+            'square_processing' => 'queued_for_cron',
+        ], 'Square invoice creation has been queued.');
     }
 
     public function update(int $id)

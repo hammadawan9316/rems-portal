@@ -177,6 +177,7 @@ class ContractController extends BaseApiController
 
         $data = $this->getRequestData(false);
         $title = trim((string) ($data['title'] ?? ''));
+        $metaTitle = trim((string) ($data['metaTitle'] ?? ($data['meta_title'] ?? '')));
         $description = trim((string) ($data['description'] ?? ''));
 
         $errors = [];
@@ -190,12 +191,17 @@ class ContractController extends BaseApiController
             $errors['description'] = 'Clause description must not exceed 65535 characters.';
         }
 
+        if ($metaTitle !== '' && mb_strlen($metaTitle) > 190) {
+            $errors['metaTitle'] = 'Clause meta title must not exceed 190 characters.';
+        }
+
         if ($errors !== []) {
             return $this->res->validation($errors);
         }
 
         $clauseModel->insert([
             'title' => $title,
+            'meta_title' => $metaTitle !== '' ? $metaTitle : null,
             'description' => $description !== '' ? $description : null,
         ]);
 
@@ -226,6 +232,14 @@ class ContractController extends BaseApiController
         if (array_key_exists('description', $data)) {
             $description = trim((string) $data['description']);
             $payload['description'] = $description !== '' ? $description : null;
+        }
+
+        if (array_key_exists('metaTitle', $data) || array_key_exists('meta_title', $data)) {
+            $metaTitle = trim((string) ($data['metaTitle'] ?? $data['meta_title']));
+            if ($metaTitle !== '' && mb_strlen($metaTitle) > 190) {
+                return $this->res->validation(['metaTitle' => 'Clause meta title must not exceed 190 characters.']);
+            }
+            $payload['meta_title'] = $metaTitle !== '' ? $metaTitle : null;
         }
 
         if ($payload === []) {
@@ -337,6 +351,7 @@ class ContractController extends BaseApiController
             $clauses[] = [
                 'id' => (int) ($clause['id'] ?? 0) ?: null,
                 'title' => $this->normalizeNullableText($clause['title'] ?? null, 190) ?? '',
+                'metaTitle' => $this->normalizeNullableText($clause['meta_title'] ?? null, 190),
                 'description' => $this->normalizeNullableText($clause['description'] ?? null, 1000000) ?? '',
             ];
         }

@@ -16,9 +16,9 @@ class QuotationRequestController extends BaseApiController
 {
     public function index()
     {
+        $params = $this->getListQueryParams();
         $requests = (new QuotationRequestModel())
-            ->orderBy('id', 'DESC')
-            ->findAll();
+            ->getAllQuotationRequests($params['page'], $params['per_page'], $params['sort_by'], $params['sort_order'], $params['search']);
 
         return $this->res->ok($requests, 'Quotation requests retrieved successfully');
     }

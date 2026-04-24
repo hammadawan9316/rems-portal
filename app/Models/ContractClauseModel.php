@@ -14,6 +14,7 @@ class ContractClauseModel extends Model
 
     protected $allowedFields = [
         'title',
+        'meta_title',
         'description',
     ];
 

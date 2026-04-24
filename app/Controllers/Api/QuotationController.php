@@ -10,6 +10,8 @@ use App\Models\QuotationModel;
 use App\Models\ServiceModel;
 use App\Libraries\SquareProjectQueueService;
 use App\Libraries\SquareService;
+use Mpdf\Mpdf;
+use Mpdf\Output\Destination;
 
 class QuotationController extends BaseApiController
 {
@@ -394,6 +396,58 @@ class QuotationController extends BaseApiController
         $quotation['project_count'] = count($projects);
 
         return $this->res->ok($quotation, 'Quotation retrieved successfully');
+    }
+
+    public function downloadPdf(int $id)
+    {
+        if (!class_exists(Mpdf::class)) {
+            return $this->res->serverError('PDF library is not installed. Please install mpdf/mpdf.');
+        }
+
+        $quotationModel = new QuotationModel();
+        $projectModel = new ProjectModel();
+
+        $quotation = $quotationModel->find($id);
+        if (!is_array($quotation)) {
+            return $this->res->notFound('Quotation not found');
+        }
+
+        $customer = model(CustomerModel::class)->find((int) ($quotation['customer_id'] ?? 0));
+        $quotation = $this->formatQuotationForResponse($quotation, is_array($customer) ? $customer : null);
+
+        $projects = $projectModel
+            ->where('quotation_id', $id)
+            ->orderBy('id', 'ASC')
+            ->findAll();
+        $projects = $this->formatProjectsForResponse($projects);
+
+        $pdfHtml = $this->buildQuotationPdfHtml($quotation, $projects);
+
+        try {
+            $mpdf = new Mpdf([
+                'mode' => 'utf-8',
+                'format' => 'A4',
+                'tempDir' => WRITEPATH . 'cache',
+            ]);
+            $mpdf->WriteHTML($pdfHtml);
+            $pdfBinary = $mpdf->Output('', Destination::STRING_RETURN);
+        } catch (\Throwable $exception) {
+            log_message('error', 'Quotation PDF generation failed. quotation_id={quotationId}, error={error}', [
+                'quotationId' => $id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return $this->res->serverError('Could not generate quotation PDF.');
+        }
+
+        $quoteNumber = trim((string) ($quotation['quote_number'] ?? ''));
+        $fileName = $quoteNumber !== '' ? $quoteNumber : 'quotation-' . $id;
+        $fileName = preg_replace('/[^A-Za-z0-9\-_]/', '-', $fileName) ?: ('quotation-' . $id);
+
+        return $this->response
+            ->setHeader('Content-Type', 'application/pdf')
+            ->setHeader('Content-Disposition', 'attachment; filename="' . $fileName . '.pdf"')
+            ->setBody($pdfBinary);
     }
 
     public function byCustomer(int $customerId)
@@ -854,6 +908,61 @@ class QuotationController extends BaseApiController
 
         $text = trim($value);
         return $text === '' ? null : $text;
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     * @param array<int, array<string, mixed>> $projects
+     */
+    private function buildQuotationPdfHtml(array $quotation, array $projects): string
+    {
+        $quoteNumber = trim((string) ($quotation['quote_number'] ?? ''));
+        $description = trim((string) ($quotation['description'] ?? ''));
+        $status = trim((string) ($quotation['status'] ?? ''));
+        $customer = is_array($quotation['customer'] ?? null) ? $quotation['customer'] : [];
+        $customerName = trim((string) ($customer['name'] ?? ''));
+        $customerEmail = trim((string) ($customer['email'] ?? ''));
+        $customerPhone = trim((string) ($customer['phone'] ?? ''));
+        $customerCompany = trim((string) ($customer['company'] ?? ''));
+
+        $rows = '';
+        foreach ($projects as $project) {
+            if (!is_array($project)) {
+                continue;
+            }
+
+            $rows .= '<tr>'
+                . '<td style="border:1px solid #ddd;padding:8px;">' . esc((string) ($project['project_title'] ?? '')) . '</td>'
+                . '<td style="border:1px solid #ddd;padding:8px;">' . esc((string) ($project['category'] ?? '')) . '</td>'
+                . '<td style="border:1px solid #ddd;padding:8px;">' . esc(implode(', ', is_array($project['services'] ?? null) ? $project['services'] : [])) . '</td>'
+                . '<td style="border:1px solid #ddd;padding:8px;text-align:right;">' . esc((string) ($project['estimated_amount'] ?? '')) . '</td>'
+                . '</tr>';
+        }
+
+        if ($rows === '') {
+            $rows = '<tr><td colspan="4" style="border:1px solid #ddd;padding:8px;text-align:center;">No projects</td></tr>';
+        }
+
+        return '<html><head><meta charset="utf-8"><title>Quotation PDF</title></head><body style="font-family:Arial,sans-serif;font-size:13px;color:#111;">'
+            . '<h1 style="margin-bottom:4px;">Quotation ' . esc($quoteNumber !== '' ? $quoteNumber : '#') . '</h1>'
+            . '<p style="margin:0 0 14px 0;">Status: ' . esc($status) . '</p>'
+            . ($description !== '' ? '<p style="margin:0 0 14px 0;">' . esc($description) . '</p>' : '')
+            . '<h3 style="margin:18px 0 6px 0;">Customer</h3>'
+            . '<p style="margin:0;">Name: ' . esc($customerName) . '</p>'
+            . '<p style="margin:0;">Email: ' . esc($customerEmail) . '</p>'
+            . '<p style="margin:0;">Phone: ' . esc($customerPhone) . '</p>'
+            . '<p style="margin:0 0 14px 0;">Company: ' . esc($customerCompany) . '</p>'
+            . '<h3 style="margin:18px 0 6px 0;">Projects</h3>'
+            . '<table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
+            . '<thead><tr>'
+            . '<th style="border:1px solid #ddd;padding:8px;background:#f3f4f6;text-align:left;">Title</th>'
+            . '<th style="border:1px solid #ddd;padding:8px;background:#f3f4f6;text-align:left;">Category</th>'
+            . '<th style="border:1px solid #ddd;padding:8px;background:#f3f4f6;text-align:left;">Services</th>'
+            . '<th style="border:1px solid #ddd;padding:8px;background:#f3f4f6;text-align:right;">Estimated Amount</th>'
+            . '</tr></thead><tbody>'
+            . $rows
+            . '</tbody></table>'
+            . '</body></html>';
     }
 
     /**

@@ -924,6 +924,14 @@ class QuotationController extends BaseApiController
         $customerEmail = trim((string) ($customer['email'] ?? ''));
         $customerPhone = trim((string) ($customer['phone'] ?? ''));
         $customerCompany = trim((string) ($customer['company'] ?? ''));
+        $logoDataUri = $this->getLogoDataUri();
+
+        $headerHtml = '<div style="text-align:center;margin-bottom:18px;">';
+        if ($logoDataUri !== null) {
+            $headerHtml .= '<img src="' . esc($logoDataUri) . '" alt="Remote Estimation" style="max-width:220px;height:auto;display:block;margin:0 auto 10px auto;">';
+        }
+        $headerHtml .= '<div style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;">Remote Estimation</div>';
+        $headerHtml .= '</div>';
 
         $rows = '';
         foreach ($projects as $project) {
@@ -944,6 +952,7 @@ class QuotationController extends BaseApiController
         }
 
         return '<html><head><meta charset="utf-8"><title>Quotation PDF</title></head><body style="font-family:Arial,sans-serif;font-size:13px;color:#111;">'
+            . $headerHtml
             . '<h1 style="margin-bottom:4px;">Quotation ' . esc($quoteNumber !== '' ? $quoteNumber : '#') . '</h1>'
             . '<p style="margin:0 0 14px 0;">Status: ' . esc($status) . '</p>'
             . ($description !== '' ? '<p style="margin:0 0 14px 0;">' . esc($description) . '</p>' : '')
@@ -963,6 +972,23 @@ class QuotationController extends BaseApiController
             . $rows
             . '</tbody></table>'
             . '</body></html>';
+    }
+
+    private function getLogoDataUri(): ?string
+    {
+        $logoPath = FCPATH . 'assets/images/logo.png';
+        if (!is_file($logoPath)) {
+            return null;
+        }
+
+        $logoContents = file_get_contents($logoPath);
+        if ($logoContents === false) {
+            return null;
+        }
+
+        $mimeType = mime_content_type($logoPath) ?: 'image/png';
+
+        return 'data:' . $mimeType . ';base64,' . base64_encode($logoContents);
     }
 
     /**

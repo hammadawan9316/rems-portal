@@ -11,7 +11,8 @@
             <td align="center">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
                     <tr>
-                        <td style="background:#0f172a;padding:20px 24px;">
+                        <td style="background:#0f172a;padding:20px 24px;text-align:center;">
+                            <img src="<?= esc(base_url('assets/images/logo.png')) ?>" alt="Remote Estimation" style="max-width:180px;height:auto;display:block;margin:0 auto 12px auto;">
                             <h1 style="margin:0;color:#ffffff;font-size:22px;line-height:1.3;">Remote Estimation</h1>
                             <p style="margin:6px 0 0 0;color:#cbd5e1;font-size:13px;">Project communication and updates</p>
                         </td>

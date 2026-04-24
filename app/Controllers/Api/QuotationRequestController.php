@@ -20,7 +20,12 @@ class QuotationRequestController extends BaseApiController
         $requests = (new QuotationRequestModel())
             ->getAllQuotationRequests($params['page'], $params['per_page'], $params['sort_by'], $params['sort_order'], $params['search']);
 
-        return $this->res->ok($requests, 'Quotation requests retrieved successfully');
+        return $this->res->paginated(
+            $requests['items'],
+            $requests['total'],
+            $params['page'],
+            $params['per_page']
+        );
     }
 
     public function show(int $id)

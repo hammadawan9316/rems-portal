@@ -3,13 +3,19 @@
 namespace App\Controllers\Api;
 
 use App\Models\CategoryModel;
+use App\Models\ContractModel;
 use App\Models\CustomerModel;
+use App\Models\ProjectFileModel;
 use App\Models\ProjectModel;
 use App\Models\ProjectServiceModel;
+use App\Models\QuotationContractModel;
 use App\Models\QuotationModel;
+use App\Models\QuotationRequestModel;
+use App\Models\QuotationRequestProjectModel;
 use App\Models\ServiceModel;
 use App\Libraries\SquareProjectQueueService;
 use App\Libraries\SquareService;
+use Config\Database;
 use Mpdf\Mpdf;
 use Mpdf\Output\Destination;
 
@@ -54,7 +60,40 @@ class QuotationController extends BaseApiController
     public function submit()
     {
         $data = $this->normalizeIncomingPayload($this->getRequestData(false));
-        $projectItems = $this->extractProjectItems($data);
+        $requestId = (int) ($data['request_id'] ?? ($data['source_request_id'] ?? 0));
+        $contractId = (int) ($data['contract_id'] ?? ($data['contractId'] ?? 0));
+
+        $request = null;
+        $projectItems = [];
+
+        $quotationRequestModel = new QuotationRequestModel();
+        $quotationRequestProjectModel = new QuotationRequestProjectModel();
+        $quotationModel = new QuotationModel();
+
+        if ($requestId > 0) {
+            $request = $quotationRequestModel->find($requestId);
+            if (!is_array($request)) {
+                return $this->res->notFound('Quotation request not found.');
+            }
+
+            $existingQuotation = $quotationModel->where('source_request_id', $requestId)->first();
+            if (is_array($existingQuotation)) {
+                return $this->res->ok([
+                    'request_id' => $requestId,
+                    'source_request_id' => $requestId,
+                    'quotation_id' => (int) ($existingQuotation['id'] ?? 0),
+                ], 'Quotation already exists for this request.');
+            }
+
+            $requestProjects = $quotationRequestProjectModel
+                ->where('quotation_request_id', $requestId)
+                ->orderBy('request_project_index', 'ASC')
+                ->findAll();
+
+            $projectItems = $this->extractProjectItemsFromRequest($requestProjects);
+        } else {
+            $projectItems = $this->extractProjectItems($data);
+        }
 
         if ($projectItems === []) {
             return $this->res->badRequest('At least one project is required.', [
@@ -79,12 +118,22 @@ class QuotationController extends BaseApiController
 
         $projectItems = $taxonomyResolution['projects'] ?? $projectItems;
 
-        $quotationModel = new QuotationModel();
         $projectModel = new ProjectModel();
         $projectServiceModel = new ProjectServiceModel();
+        $projectFileModel = new ProjectFileModel();
         $customerModel = new CustomerModel();
+        $quotationContractModel = new QuotationContractModel();
+        $contractModel = new ContractModel();
 
-        $customerId = (int) ($data['customer_id'] ?? 0);
+        $contract = null;
+        if ($contractId > 0) {
+            $contract = $contractModel->findDetailed($contractId);
+            if (!is_array($contract)) {
+                return $this->res->notFound('Contract template not found.');
+            }
+        }
+
+        $customerId = (int) ($data['customer_id'] ?? (($request['customer_id'] ?? 0)));
         if ($customerId < 1) {
             return $this->res->badRequest('Customer id is required.', [
                 'customer_id' => 'A valid customer id is required.',
@@ -100,21 +149,48 @@ class QuotationController extends BaseApiController
 
         $quotationPayload = [
             'customer_id' => $customerId,
+            'source_request_id' => $requestId > 0 ? $requestId : null,
             'quote_number' => $quoteNumber,
-            'description' => $this->normalizeNullableText($data['description'] ?? ($data['title'] ?? null)),
+            'description' => $this->normalizeNullableText($data['description'] ?? ($data['title'] ?? ($request['description'] ?? null))),
             'status' => self::STATUS_PENDING,
-            'notes' => $this->normalizeNullableText($data['notes'] ?? null),
+            'notes' => $this->normalizeNullableText($data['notes'] ?? ($request['notes'] ?? null)),
             'submitted_at' => date('Y-m-d H:i:s'),
             'discount_type' => $this->normalizeDiscountType($data['discount_type'] ?? ($data['discountType'] ?? null)),
             'discount_value' => $this->normalizeDecimalValue($data['discount_value'] ?? ($data['discountValue'] ?? null)),
             'discount_scope' => $this->normalizeDiscountScope($data['discount_scope'] ?? ($data['discountScope'] ?? null)),
         ];
 
+        $db = Database::connect();
+        $db->transStart();
+
         $quotationModel->insert($quotationPayload);
 
         $quotationId = (int) $quotationModel->getInsertID();
         if ($quotationId < 1) {
+            $db->transRollback();
             return $this->res->serverError('Quotation could not be created.');
+        }
+
+        $quotationContractId = null;
+        if (is_array($contract)) {
+            $savedAssignment = $quotationContractModel->saveAssignmentWithClauses([
+                'quotation_id' => $quotationId,
+                'contract_id' => $contractId,
+                'owner_name' => $this->normalizeNullableText($data['ownerName'] ?? ($contract['owner_name'] ?? null)),
+                'owner_signature' => $this->normalizeNullableText($data['ownerSignature'] ?? ($data['owner_signature'] ?? null)),
+                'owner_signed_at' => $this->normalizeDateTimeString($data['ownerSignedAt'] ?? ($data['owner_signed_at'] ?? null)),
+                'recipient_name' => $this->normalizeNullableText($data['recipientName'] ?? ($data['recipient_name'] ?? ($request['client_name'] ?? null))),
+                'recipient_signature' => $this->normalizeNullableText($data['recipientSignature'] ?? ($data['recipient_signature'] ?? null)),
+                'recipient_signed_at' => $this->normalizeDateTimeString($data['dateSigned'] ?? ($data['signedAt'] ?? ($data['recipient_signed_at'] ?? null))),
+            ], $this->extractTemplateClauseIds($contract));
+
+            if (!is_array($savedAssignment)) {
+                $db->transRollback();
+
+                return $this->res->serverError('Contract could not be assigned to quotation.');
+            }
+
+            $quotationContractId = (int) ($savedAssignment['id'] ?? 0) ?: null;
         }
 
         $createdProjects = [];
@@ -142,10 +218,33 @@ class QuotationController extends BaseApiController
             $projectId = (int) $projectModel->getInsertID();
             $projectServiceModel->replaceServices($projectId, is_array($item['service_ids'] ?? null) ? $item['service_ids'] : []);
 
+            if ($requestId > 0) {
+                $requestProjectIndex = (int) ($item['_request_project_index'] ?? 0);
+                $projectFileModel
+                    ->where('quotation_request_id', $requestId)
+                    ->where('request_project_index', $requestProjectIndex)
+                    ->set([
+                        'project_id' => $projectId,
+                    ])
+                    ->update();
+            }
+
             $savedProject = $projectModel->find($projectId);
             if (is_array($savedProject)) {
                 $createdProjects[] = $savedProject;
             }
+        }
+
+        if ($requestId > 0) {
+            $quotationRequestModel->update($requestId, [
+                'status' => 'quoted',
+                'quoted_at' => date('Y-m-d H:i:s'),
+            ]);
+        }
+
+        $db->transComplete();
+        if (!$db->transStatus()) {
+            return $this->res->serverError('Quotation could not be created.');
         }
 
         $quotation = $quotationModel->find($quotationId);
@@ -156,6 +255,9 @@ class QuotationController extends BaseApiController
 
         $quotation['projects'] = $this->formatProjectsForResponse($createdProjects);
         $quotation['project_count'] = count($createdProjects);
+        $quotation['request_id'] = $requestId > 0 ? $requestId : null;
+        $quotation['contract_id'] = $contractId > 0 ? $contractId : null;
+        $quotation['quotation_contract_id'] = $quotationContractId;
 
         return $this->res->created($quotation, 'Quotation created successfully from projects. Square invoice creation is deferred until explicitly requested by admin.');
     }
@@ -1423,6 +1525,73 @@ class QuotationController extends BaseApiController
         }
 
         return date('Y-m-d', $timestamp);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $requestProjects
+     * @return array<int, array<string, mixed>>
+     */
+    private function extractProjectItemsFromRequest(array $requestProjects): array
+    {
+        $items = [];
+
+        foreach ($requestProjects as $requestProject) {
+            if (!is_array($requestProject)) {
+                continue;
+            }
+
+            $serviceIds = json_decode((string) ($requestProject['service_ids_json'] ?? '[]'), true);
+
+            $items[] = [
+                '_request_project_index' => (int) ($requestProject['request_project_index'] ?? 0),
+                'project_title' => trim((string) ($requestProject['project_title'] ?? '')),
+                'project_description' => trim((string) ($requestProject['project_description'] ?? '')),
+                'estimated_amount' => $this->normalizeMoneyValue($requestProject['estimated_amount'] ?? null),
+                'category_id' => (int) ($requestProject['category_id'] ?? 0),
+                'service_ids' => $this->normalizeServiceIds(is_array($serviceIds) ? $serviceIds : []),
+                'payment_type' => $this->normalizePaymentType($requestProject['payment_type'] ?? 'fixed_rate'),
+                'hourly_hours' => $this->normalizeDecimalValue($requestProject['hourly_hours'] ?? null),
+                'scope' => trim((string) ($requestProject['scope'] ?? '')),
+                'estimate_type' => trim((string) ($requestProject['estimate_type'] ?? '')),
+                'zip_code' => trim((string) ($requestProject['zip_code'] ?? '')),
+                'deadline' => trim((string) ($requestProject['deadline'] ?? '')),
+                'delivery_date' => $this->normalizeDateString($requestProject['delivery_date'] ?? null),
+                'deadline_date' => $this->normalizeDateString($requestProject['deadline_date'] ?? null),
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * @param array<string, mixed> $contract
+     * @return array<int, int>
+     */
+    private function extractTemplateClauseIds(array $contract): array
+    {
+        $clauses = is_array($contract['clauses'] ?? null) ? $contract['clauses'] : [];
+        $ids = array_map(static fn (array $clause): int => (int) ($clause['id'] ?? 0), $clauses);
+
+        return array_values(array_filter($ids, static fn (int $clauseId): bool => $clauseId > 0));
+    }
+
+    private function normalizeDateTimeString(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $text = trim($value);
+        if ($text === '') {
+            return null;
+        }
+
+        $timestamp = strtotime($text);
+        if ($timestamp === false) {
+            return null;
+        }
+
+        return date('Y-m-d H:i:s', $timestamp);
     }
 
 

@@ -78,7 +78,7 @@ class QuotationRequestController extends BaseApiController
 
             $rawServiceIds = json_decode((string) ($projectRow['service_ids_json'] ?? '[]'), true);
             $normalizedServiceIds = is_array($rawServiceIds)
-                ? array_values(array_unique(array_filter(array_map('intval', $rawServiceIds), static fn (int $serviceId): bool => $serviceId > 0)))
+                ? array_values(array_unique(array_filter(array_map('intval', $rawServiceIds), static fn(int $serviceId): bool => $serviceId > 0)))
                 : [];
 
             $requestProjectIndex = (int) ($projectRow['request_project_index'] ?? 0);
@@ -129,7 +129,7 @@ class QuotationRequestController extends BaseApiController
             $requestProjectIndex = (int) ($project['request_project_index'] ?? 0);
             $serviceIds = $serviceIdsByRequestProjectIndex[$requestProjectIndex] ?? [];
             $project['service_ids'] = $serviceIds;
-            $project['services'] = array_values(array_filter(array_map(static fn (int $serviceId): string => $serviceNameById[$serviceId] ?? '', $serviceIds), static fn (string $name): bool => $name !== ''));
+            $project['services'] = array_values(array_filter(array_map(static fn(int $serviceId): string => $serviceNameById[$serviceId] ?? '', $serviceIds), static fn(string $name): bool => $name !== ''));
 
             $categoryId = (int) ($project['category_id'] ?? 0);
             $project['category'] = $categoryNameById[$categoryId] ?? '';
@@ -145,7 +145,7 @@ class QuotationRequestController extends BaseApiController
                     'id' => (int) ($file['id'] ?? 0),
                     'access_token' => (string) ($file['public_token'] ?? ''),
                 ];
-            }, array_values(array_filter($files, static fn ($file): bool => is_array($file)))));
+            }, array_values(array_filter($files, static fn($file): bool => is_array($file)))));
         }
         unset($project);
 

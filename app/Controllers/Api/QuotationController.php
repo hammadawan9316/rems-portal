@@ -730,6 +730,9 @@ class QuotationController extends BaseApiController
         $quotation['projects'] = $projects;
         $quotation['project_count'] = count($projects);
 
+        $assignment = model(QuotationContractModel::class)->findByQuotationId($id);
+        $quotation['quotation_contract_id'] = is_array($assignment) ? ((int) ($assignment['id'] ?? 0) ?: null) : null;
+
         return $this->res->ok($quotation, 'Quotation retrieved successfully');
     }
 
@@ -1365,9 +1368,60 @@ class QuotationController extends BaseApiController
     {
         $quotationModel = new QuotationModel();
         $result = $quotationModel->paginateQuotations($customerId, $search, $perPage, $offset, $status);
+        $result['items'] = $this->attachQuotationContractIds($result['items']);
         $result['items'] = array_map(fn (array $quotation): array => $this->formatQuotationForResponse($quotation), $result['items']);
 
         return $result;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $quotations
+     * @return array<int, array<string, mixed>>
+     */
+    private function attachQuotationContractIds(array $quotations): array
+    {
+        if ($quotations === []) {
+            return [];
+        }
+
+        $quotationIds = array_map(static fn (array $quotation): int => (int) ($quotation['id'] ?? 0), $quotations);
+        $quotationIds = array_values(array_unique(array_filter($quotationIds, static fn (int $id): bool => $id > 0)));
+        if ($quotationIds === []) {
+            return $quotations;
+        }
+
+        $rows = model(QuotationContractModel::class)
+            ->select('id, quotation_id')
+            ->whereIn('quotation_id', $quotationIds)
+            ->orderBy('id', 'DESC')
+            ->findAll();
+
+        $contractIdByQuotationId = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $quotationId = (int) ($row['quotation_id'] ?? 0);
+            $contractId = (int) ($row['id'] ?? 0);
+            if ($quotationId < 1 || $contractId < 1 || isset($contractIdByQuotationId[$quotationId])) {
+                continue;
+            }
+
+            $contractIdByQuotationId[$quotationId] = $contractId;
+        }
+
+        foreach ($quotations as &$quotation) {
+            if (!is_array($quotation)) {
+                continue;
+            }
+
+            $quotationId = (int) ($quotation['id'] ?? 0);
+            $quotation['quotation_contract_id'] = $contractIdByQuotationId[$quotationId] ?? null;
+        }
+        unset($quotation);
+
+        return $quotations;
     }
 
     /**

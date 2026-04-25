@@ -57,15 +57,20 @@ class QuotationContractController extends BaseApiController
 
     public function showByQuotation(int $quotationId)
     {
-        $quotation = (new QuotationModel())->find($quotationId);
-        if (!is_array($quotation)) {
-            return $this->res->notFound('Quotation not found');
-        }
-
+        
         $quotationContractModel = new QuotationContractModel();
         $assignment = $quotationContractModel->findByQuotationId($quotationId);
         if (!is_array($assignment)) {
+            $assignment = $quotationContractModel->find($quotationId);
+        }
+
+        if (!is_array($assignment)) {
             return $this->res->notFound('Quotation contract not found');
+        }
+
+        $quotation = (new QuotationModel())->find((int) ($assignment['quotation_id'] ?? 0));
+        if (!is_array($quotation)) {
+            return $this->res->notFound('Quotation not found');
         }
 
         $contract = (new ContractModel())->findDetailed((int) ($assignment['contract_id'] ?? 0));

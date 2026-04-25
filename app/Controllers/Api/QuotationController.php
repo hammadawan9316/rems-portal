@@ -318,6 +318,18 @@ class QuotationController extends BaseApiController
             return $this->res->badRequest('Public response link can only be sent for quotations in requested or pending status.');
         }
 
+        if ($status !== self::STATUS_PENDING) {
+            $updated = $quotationModel->update($id, [
+                'status' => self::STATUS_PENDING,
+            ]);
+
+            if (!$updated) {
+                return $this->res->serverError('Could not update quotation status to pending before sending link.');
+            }
+
+            $quotation['status'] = self::STATUS_PENDING;
+        }
+
         $customerId = (int) ($quotation['customer_id'] ?? 0);
         $customer = $customerModel->find($customerId);
         if (!is_array($customer)) {

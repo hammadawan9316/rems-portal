@@ -8,9 +8,9 @@ use App\Models\QuotationModel;
 
 class QuotationContractController extends BaseApiController
 {
-    public function publicShow(string $token)
+    public function publicShow(string $token = '')
     {
-        $context = $this->resolvePublicQuotationContract($token);
+        $context = $this->resolvePublicQuotationContract($this->resolvePublicToken($token));
         if (!is_array($context)) {
             return $this->res->notFound('Quotation contract not found');
         }
@@ -18,9 +18,9 @@ class QuotationContractController extends BaseApiController
         return $this->res->ok($this->formatPublicResponse($context), 'Quotation contract retrieved successfully');
     }
 
-    public function publicSubmit(string $token)
+    public function publicSubmit(string $token = '')
     {
-        $context = $this->resolvePublicQuotationContract($token);
+        $context = $this->resolvePublicQuotationContract($this->resolvePublicToken($token));
         if (!is_array($context)) {
             return $this->res->notFound('Quotation contract not found');
         }
@@ -410,6 +410,17 @@ class QuotationContractController extends BaseApiController
             'assignment' => $assignment,
             'clauses' => $clauses,
         ];
+    }
+
+    private function resolvePublicToken(string $routeToken): string
+    {
+        $token = trim($routeToken);
+        if ($token !== '') {
+            return $token;
+        }
+
+        $queryToken = $this->request->getGet('token');
+        return is_string($queryToken) ? trim($queryToken) : '';
     }
 
     /**

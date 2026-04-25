@@ -1466,12 +1466,15 @@ class QuotationController extends BaseApiController
      */
     private function buildFrontendUrl(string $path, array $query = []): string
     {
-        $appUrl = trim((string) getenv('APP_URL'));
-        if ($appUrl === '') {
-            $appUrl = rtrim((string) base_url(), '/');
+        $frontendUrl = trim((string) getenv('app.FrontendURL'));
+        if ($frontendUrl === '') {
+            $frontendUrl = trim((string) getenv('APP_URL'));
+        }
+        if ($frontendUrl === '') {
+            $frontendUrl = rtrim((string) base_url(), '/');
         }
 
-        $url = rtrim($appUrl, '/') . '/' . ltrim($path, '/');
+        $url = rtrim($frontendUrl, '/') . '/' . ltrim($path, '/');
         if ($query === []) {
             return $url;
         }

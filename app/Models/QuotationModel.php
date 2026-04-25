@@ -85,7 +85,7 @@ class QuotationModel extends Model
 
     public function findActiveByPublicResponseToken(string $token): ?array
     {
-        $plainToken = trim($token);
+        $plainToken = $this->normalizePublicResponseToken($token);
         if ($plainToken === '') {
             return null;
         }
@@ -100,7 +100,7 @@ class QuotationModel extends Model
 
     public function findByPublicResponseToken(string $token): ?array
     {
-        $plainToken = trim($token);
+        $plainToken = $this->normalizePublicResponseToken($token);
         if ($plainToken === '') {
             return null;
         }
@@ -121,6 +121,36 @@ class QuotationModel extends Model
             'public_response_token_used_at' => date('Y-m-d H:i:s'),
             'public_response_token_expires_at' => date('Y-m-d H:i:s'),
         ]);
+    }
+
+    private function normalizePublicResponseToken(string $token): string
+    {
+        $normalized = trim(rawurldecode($token));
+        $normalized = trim($normalized, " \t\n\r\0\x0B\"'");
+
+        // Support accidental full URL/query input by extracting token=... when present.
+        if (str_contains($normalized, 'token=')) {
+            $query = parse_url($normalized, PHP_URL_QUERY);
+            if (is_string($query) && $query !== '') {
+                parse_str($query, $params);
+                $candidate = trim((string) ($params['token'] ?? ''));
+                if ($candidate !== '') {
+                    $normalized = $candidate;
+                }
+            } else {
+                parse_str($normalized, $params);
+                $candidate = trim((string) ($params['token'] ?? ''));
+                if ($candidate !== '') {
+                    $normalized = $candidate;
+                }
+            }
+        }
+
+        if (preg_match('/^[a-f0-9]{64}$/i', $normalized) === 1) {
+            return strtolower($normalized);
+        }
+
+        return $normalized;
     }
 
     /**

@@ -921,12 +921,15 @@ class ProjectIntakeController extends BaseApiController
 
     private function buildFileViewerUrl(string $token): string
     {
-        $appUrl = trim((string) getenv('APP_URL'));
-        if ($appUrl === '') {
-            $appUrl = rtrim((string) base_url(), '/');
+        $frontendUrl = trim((string) getenv('app.FrontendURL'));
+        if ($frontendUrl === '') {
+            $frontendUrl = trim((string) getenv('APP_URL'));
+        }
+        if ($frontendUrl === '') {
+            $frontendUrl = rtrim((string) base_url(), '/');
         }
 
-        return rtrim($appUrl, '/') . '/view-file?token=' . urlencode($token);
+        return rtrim($frontendUrl, '/') . '/view-file?token=' . urlencode($token);
     }
 
     private function generateFilePassword(int $length = 10): string

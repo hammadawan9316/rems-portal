@@ -19,6 +19,11 @@ class App extends BaseConfig
     public string $baseURL = 'http://localhost:8080/';
 
     /**
+     * Frontend application base URL used for customer-facing links in emails.
+     */
+    public string $FrontendURL = '';
+
+    /**
      * Allowed Hostnames in the Site URL other than the hostname in the baseURL.
      * If you want to accept multiple Hostnames, set this.
      *

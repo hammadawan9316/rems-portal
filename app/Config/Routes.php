@@ -32,7 +32,11 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
     $routes->get('projects/files/(:segment)', 'ProjectIntakeController::downloadFile/$1');
     $routes->get('get_quotation_public_details(:segment)', 'QuotationController::publicShow/$1');
     $routes->post('customer_responded(:segment)', 'QuotationController::publicRespond/$1');
+    $routes->get('quotations_contract', 'QuotationContractController::publicShow');
+    $routes->get('quotations_contract/(:segment)', 'QuotationContractController::publicShow/$1');
     $routes->get('quotations_contract(:segment)', 'QuotationContractController::publicShow/$1');
+    $routes->post('quotations_contract_signature/contract', 'QuotationContractController::publicSubmit');
+    $routes->post('quotations_contract_signature/(:segment)', 'QuotationContractController::publicSubmit/$1');
     $routes->post('quotations_contract_signature(:segment)/contract', 'QuotationContractController::publicSubmit/$1');
 
     // Public category and service routes

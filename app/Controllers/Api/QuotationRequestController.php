@@ -7,6 +7,7 @@ use App\Models\ProjectFileModel;
 use App\Models\ProjectModel;
 use App\Models\ProjectServiceModel;
 use App\Models\QuotationModel;
+use App\Models\QuotationContractModel;
 use App\Models\QuotationRequestModel;
 use App\Models\QuotationRequestProjectModel;
 use App\Models\ServiceModel;
@@ -36,10 +37,24 @@ class QuotationRequestController extends BaseApiController
         $projectFileModel = new ProjectFileModel();
         $categoryModel = new CategoryModel();
         $serviceModel = new ServiceModel();
+        $quotationModel = new QuotationModel();
+        $quotationContractModel = new QuotationContractModel();
 
         $request = $requestModel->find($id);
         if (!is_array($request)) {
             return $this->res->notFound('Quotation request not found');
+        }
+
+        unset($request['payload_snapshot']);
+
+        $quotation = $quotationModel->where('source_request_id', $id)->orderBy('id', 'DESC')->first();
+        $quotationId = is_array($quotation) ? (int) ($quotation['id'] ?? 0) : 0;
+        $contractId = null;
+
+        if ($quotationId > 0) {
+            $quotationContract = $quotationContractModel->findByQuotationId($quotationId);
+            $resolvedContractId = is_array($quotationContract) ? (int) ($quotationContract['contract_id'] ?? 0) : 0;
+            $contractId = $resolvedContractId > 0 ? $resolvedContractId : null;
         }
 
         $projects = $requestProjectModel
@@ -109,6 +124,8 @@ class QuotationRequestController extends BaseApiController
                 continue;
             }
 
+            unset($project['raw_payload']);
+
             $requestProjectIndex = (int) ($project['request_project_index'] ?? 0);
             $serviceIds = $serviceIdsByRequestProjectIndex[$requestProjectIndex] ?? [];
             $project['service_ids'] = $serviceIds;
@@ -123,10 +140,17 @@ class QuotationRequestController extends BaseApiController
                 ->orderBy('id', 'ASC')
                 ->findAll();
 
-            $project['files'] = $files;
+            $project['files'] = array_values(array_map(static function (array $file): array {
+                return [
+                    'id' => (int) ($file['id'] ?? 0),
+                    'access_token' => (string) ($file['public_token'] ?? ''),
+                ];
+            }, array_values(array_filter($files, static fn ($file): bool => is_array($file)))));
         }
         unset($project);
 
+        $request['quotation_id'] = $quotationId > 0 ? $quotationId : null;
+        $request['contract_id'] = $contractId;
         $request['projects'] = $projects;
         $request['project_count'] = count($projects);
 

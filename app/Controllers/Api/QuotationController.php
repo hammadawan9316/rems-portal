@@ -15,6 +15,10 @@ use Mpdf\Output\Destination;
 
 class QuotationController extends BaseApiController
 {
+    private const RESPONSE_ACTOR_ADMIN = 'admin';
+    private const RESPONSE_ACTOR_CUSTOMER = 'customer';
+    private const PUBLIC_TOKEN_EXPIRY_DAYS = 7;
+
     private const STATUS_REQUESTED = 'requested';
     private const STATUS_PENDING = 'pending';
     private const STATUS_ACCEPTED = 'accepted';
@@ -32,6 +36,14 @@ class QuotationController extends BaseApiController
         self::STATUS_REJECTED,
         self::STATUS_COMPLETED,
         self::STATUS_SQUARE_FAILED,
+    ];
+
+    /**
+     * @var array<int, string>
+     */
+    private const CUSTOMER_ALLOWED_RESPONSE_STATUSES = [
+        self::STATUS_REQUESTED,
+        self::STATUS_PENDING,
     ];
 
     public function store()
@@ -189,6 +201,196 @@ class QuotationController extends BaseApiController
         ], 'Square invoice creation has been queued.');
     }
 
+    public function sendPublicResponseLink(int $id)
+    {
+        $quotationModel = new QuotationModel();
+        $customerModel = new CustomerModel();
+
+        $quotation = $quotationModel->find($id);
+        if (!is_array($quotation)) {
+            return $this->res->notFound('Quotation not found');
+        }
+
+        $status = strtolower(trim((string) ($quotation['status'] ?? '')));
+        if (!in_array($status, self::CUSTOMER_ALLOWED_RESPONSE_STATUSES, true)) {
+            return $this->res->badRequest('Public response link can only be sent for quotations in requested or pending status.');
+        }
+
+        $customerId = (int) ($quotation['customer_id'] ?? 0);
+        $customer = $customerModel->find($customerId);
+        if (!is_array($customer)) {
+            return $this->res->notFound('Customer not found.');
+        }
+
+        $customerEmail = trim((string) ($customer['email'] ?? ''));
+        if ($customerEmail === '') {
+            return $this->res->badRequest('Customer does not have a valid email address.');
+        }
+
+        $tokenResult = $quotationModel->issuePublicResponseToken($id, self::PUBLIC_TOKEN_EXPIRY_DAYS);
+        if (!is_array($tokenResult)) {
+            return $this->res->serverError('Could not generate quotation response link.');
+        }
+
+        $plainToken = (string) ($tokenResult['token'] ?? '');
+        $expiresAt = (string) ($tokenResult['expires_at'] ?? '');
+        $quotationPreviewUrl = $this->buildPublicQuotationPreviewUrl($plainToken);
+        $contractPreviewUrl = $this->buildPublicContractPreviewUrl($plainToken);
+        $quoteNumber = trim((string) ($quotation['quote_number'] ?? ''));
+        $recipientName = trim((string) ($customer['name'] ?? ''));
+        $recipientName = $recipientName !== '' ? $recipientName : 'Customer';
+
+        $emailQueue = service('emailQueue');
+        $subject = 'Quotation Response Requested' . ($quoteNumber !== '' ? ' - ' . $quoteNumber : '');
+        $expiryHuman = $this->formatDateTimeForEmail($expiresAt);
+
+        $contentHtml = '<p style="margin:0 0 14px 0;">Your quotation is ready for review.</p>'
+            . '<p style="margin:0 0 14px 0;">Please use the secure links below to review your quotation and related contract.</p>'
+            . '<p style="margin:0 0 8px 0;"><strong>Quotation:</strong> ' . esc($quoteNumber !== '' ? $quoteNumber : ('#' . $id)) . '</p>'
+            . '<p style="margin:0 0 14px 0;"><strong>Link expires:</strong> ' . esc($expiryHuman) . '</p>'
+            . '<p style="margin:0 0 8px 0;"><strong>Quotation Preview URL:</strong></p>'
+            . '<p style="margin:0 0 14px 0;word-break:break-all;"><a href="' . esc($quotationPreviewUrl) . '">' . esc($quotationPreviewUrl) . '</a></p>'
+            . '<p style="margin:0 0 8px 0;"><strong>Contract Preview URL:</strong></p>'
+            . '<p style="margin:0;word-break:break-all;"><a href="' . esc($contractPreviewUrl) . '">' . esc($contractPreviewUrl) . '</a></p>';
+
+        $body = $emailQueue->renderTemplate([
+            'subject' => $subject,
+            'recipientName' => $recipientName,
+            'headline' => 'Review Your Quotation',
+            'contentHtml' => $contentHtml,
+            'actionText' => 'Open Quotation Preview',
+            'actionUrl' => $quotationPreviewUrl,
+        ]);
+
+        $queueId = queue_email_job($customerEmail, $subject, $body, [
+            'mail_type' => 'html',
+        ]);
+
+        return $this->res->ok([
+            'quotation_id' => $id,
+            'queue_job_id' => $queueId,
+            'expires_at' => $expiresAt,
+            'quotation_preview_url' => $quotationPreviewUrl,
+            'contract_preview_url' => $contractPreviewUrl,
+            'customer_email_masked' => $this->maskEmail($customerEmail),
+        ], 'Public quotation response email queued successfully.');
+    }
+
+    public function publicShow(string $token)
+    {
+        $quotationModel = new QuotationModel();
+        $projectModel = new ProjectModel();
+
+        $quotation = $quotationModel->findByPublicResponseToken($token);
+        if (!is_array($quotation)) {
+            return $this->res->unauthorized('Invalid or expired quotation response link.');
+        }
+
+        if (!$this->isPublicTokenActive($quotation)) {
+            return $this->res->unauthorized('Quotation response link is expired or already used.');
+        }
+
+        $customer = model(CustomerModel::class)->find((int) ($quotation['customer_id'] ?? 0));
+        $quotation = $this->formatQuotationForResponse($quotation, is_array($customer) ? $customer : null);
+        $quotation = $this->sanitizeQuotationForPublicResponse($quotation);
+
+        $projects = $projectModel
+            ->where('quotation_id', (int) ($quotation['id'] ?? 0))
+            ->orderBy('id', 'ASC')
+            ->findAll();
+
+        $projects = $this->formatProjectsForResponse($projects);
+
+        return $this->res->ok([
+            'quotation' => $quotation,
+            'projects' => $projects,
+            'project_count' => count($projects),
+        ], 'Quotation retrieved successfully.');
+    }
+
+    public function publicRespond(string $token)
+    {
+        $quotationModel = new QuotationModel();
+        $projectModel = new ProjectModel();
+
+        $quotation = $quotationModel->findByPublicResponseToken($token);
+        if (!is_array($quotation)) {
+            return $this->res->unauthorized('Invalid or expired quotation response link.');
+        }
+
+        $currentStatus = strtolower(trim((string) ($quotation['status'] ?? '')));
+        if (!$this->isPublicTokenActive($quotation)) {
+            if ($this->isTerminalStatus($currentStatus)) {
+                return $this->response
+                    ->setStatusCode(409)
+                    ->setJSON([
+                        'status' => false,
+                        'message' => 'This quotation has already been finalized.',
+                        'code' => 409,
+                        'data' => [
+                            'status' => $currentStatus,
+                        ],
+                    ]);
+            }
+
+            return $this->res->unauthorized('Quotation response link is expired or already used.');
+        }
+
+        if (!in_array($currentStatus, self::CUSTOMER_ALLOWED_RESPONSE_STATUSES, true)) {
+            return $this->response
+                ->setStatusCode(409)
+                ->setJSON([
+                    'status' => false,
+                    'message' => 'This quotation can no longer be responded to.',
+                    'code' => 409,
+                    'data' => [
+                        'status' => $currentStatus,
+                    ],
+                ]);
+        }
+
+        $data = $this->getRequestData(false);
+        $decision = $this->resolveDecisionStatus($data['decision'] ?? ($data['action'] ?? ($data['status'] ?? null)));
+        if ($decision === null) {
+            return $this->res->validation([
+                'decision' => 'Decision must be accept/accepted or reject/rejected.',
+            ]);
+        }
+
+        $responseReason = $this->normalizeNullableText($data['reason'] ?? ($data['response_reason'] ?? null));
+        $responseAt = date('Y-m-d H:i:s');
+
+        $quotationModel->update((int) $quotation['id'], [
+            'status' => $decision,
+            'response_reason' => $responseReason,
+            'response_actor' => self::RESPONSE_ACTOR_CUSTOMER,
+            'response_at' => $responseAt,
+        ]);
+        $quotationModel->invalidatePublicResponseToken((int) $quotation['id']);
+
+        $updatedQuotation = $quotationModel->find((int) $quotation['id']);
+        if (!is_array($updatedQuotation)) {
+            return $this->res->notFound('Quotation not found');
+        }
+
+        $customer = model(CustomerModel::class)->find((int) ($updatedQuotation['customer_id'] ?? 0));
+        $updatedQuotation = $this->formatQuotationForResponse($updatedQuotation, is_array($customer) ? $customer : null);
+        $updatedQuotation = $this->sanitizeQuotationForPublicResponse($updatedQuotation);
+
+        $projects = $projectModel
+            ->where('quotation_id', (int) $updatedQuotation['id'])
+            ->orderBy('id', 'ASC')
+            ->findAll();
+
+        $projects = $this->formatProjectsForResponse($projects);
+
+        return $this->res->ok([
+            'quotation' => $updatedQuotation,
+            'projects' => $projects,
+            'project_count' => count($projects),
+        ], 'Quotation response recorded successfully.');
+    }
+
     public function update(int $id)
     {
         $quotationModel = new QuotationModel();
@@ -224,6 +426,10 @@ class QuotationController extends BaseApiController
             $quotationPayload['description'] = $this->normalizeNullableText($data['description'] ?? ($data['title'] ?? null));
         }
 
+        $responseReasonProvided = array_key_exists('response_reason', $data) || array_key_exists('reason', $data);
+        $responseReason = $this->normalizeNullableText($data['response_reason'] ?? ($data['reason'] ?? null));
+        $statusChanged = false;
+
         if (array_key_exists('status', $data)) {
             $statusResult = $this->resolveStatusFilter($data['status']);
             if (is_array($statusResult) && isset($statusResult['error'])) {
@@ -233,6 +439,17 @@ class QuotationController extends BaseApiController
             }
 
             $quotationPayload['status'] = is_string($statusResult) ? $statusResult : self::STATUS_PENDING;
+            $statusChanged = true;
+
+            if ($this->isTerminalStatus((string) $quotationPayload['status']) || $responseReasonProvided) {
+                $quotationPayload['response_reason'] = $responseReason;
+                $quotationPayload['response_actor'] = self::RESPONSE_ACTOR_ADMIN;
+                $quotationPayload['response_at'] = date('Y-m-d H:i:s');
+            }
+        } elseif ($responseReasonProvided) {
+            $quotationPayload['response_reason'] = $responseReason;
+            $quotationPayload['response_actor'] = self::RESPONSE_ACTOR_ADMIN;
+            $quotationPayload['response_at'] = date('Y-m-d H:i:s');
         }
 
         if (array_key_exists('notes', $data)) {
@@ -281,6 +498,10 @@ class QuotationController extends BaseApiController
 
         if ($quotationPayload !== []) {
             $quotationModel->update($id, $quotationPayload);
+
+            if ($statusChanged && isset($quotationPayload['status']) && $this->isTerminalStatus((string) $quotationPayload['status'])) {
+                $quotationModel->invalidatePublicResponseToken($id);
+            }
         }
 
         $effectiveCustomerId = (int) ($quotationPayload['customer_id'] ?? ($quotation['customer_id'] ?? 0));
@@ -1017,6 +1238,7 @@ class QuotationController extends BaseApiController
         ];
 
         unset($quotation['title']);
+        unset($quotation['public_response_token_hash'], $quotation['public_response_token_issued_at'], $quotation['public_response_token_expires_at'], $quotation['public_response_token_used_at']);
         unset($quotation['customer_ref_id'], $quotation['customer_name'], $quotation['customer_email'], $quotation['customer_phone'], $quotation['customer_company']);
 
         return $quotation;
@@ -1055,6 +1277,119 @@ class QuotationController extends BaseApiController
         }
 
         return $normalized;
+    }
+
+    private function resolveDecisionStatus(mixed $decision): ?string
+    {
+        $normalized = strtolower(trim((string) $decision));
+        if (in_array($normalized, ['accept', self::STATUS_ACCEPTED], true)) {
+            return self::STATUS_ACCEPTED;
+        }
+
+        if (in_array($normalized, ['reject', self::STATUS_REJECTED], true)) {
+            return self::STATUS_REJECTED;
+        }
+
+        return null;
+    }
+
+    private function isTerminalStatus(string $status): bool
+    {
+        $normalized = strtolower(trim($status));
+        return in_array($normalized, [self::STATUS_ACCEPTED, self::STATUS_REJECTED], true);
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     */
+    private function isPublicTokenActive(array $quotation): bool
+    {
+        $usedAt = trim((string) ($quotation['public_response_token_used_at'] ?? ''));
+        if ($usedAt !== '') {
+            return false;
+        }
+
+        $expiresAt = trim((string) ($quotation['public_response_token_expires_at'] ?? ''));
+        if ($expiresAt === '') {
+            return false;
+        }
+
+        $expiresTs = strtotime($expiresAt);
+        if ($expiresTs === false) {
+            return false;
+        }
+
+        return $expiresTs > time();
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     * @return array<string, mixed>
+     */
+    private function sanitizeQuotationForPublicResponse(array $quotation): array
+    {
+        unset($quotation['source_request_id'], $quotation['notes'], $quotation['square_order_id'], $quotation['square_invoice_id'], $quotation['square_status'], $quotation['square_error'], $quotation['square_synced_at']);
+
+        return $quotation;
+    }
+
+    private function buildPublicQuotationPreviewUrl(string $token): string
+    {
+        return $this->buildFrontendUrl('/quotation-preview', [
+            'token' => $token,
+        ]);
+    }
+
+    private function buildPublicContractPreviewUrl(string $token): string
+    {
+        return $this->buildFrontendUrl('/contract-preview', [
+            'token' => $token,
+        ]);
+    }
+
+    /**
+     * @param array<string, string> $query
+     */
+    private function buildFrontendUrl(string $path, array $query = []): string
+    {
+        $appUrl = trim((string) getenv('APP_URL'));
+        if ($appUrl === '') {
+            $appUrl = rtrim((string) base_url(), '/');
+        }
+
+        $url = rtrim($appUrl, '/') . '/' . ltrim($path, '/');
+        if ($query === []) {
+            return $url;
+        }
+
+        return $url . '?' . http_build_query($query);
+    }
+
+    private function formatDateTimeForEmail(string $value): string
+    {
+        $timestamp = strtotime($value);
+        if ($timestamp === false) {
+            return $value;
+        }
+
+        return date('M d, Y H:i', $timestamp);
+    }
+
+    private function maskEmail(string $email): string
+    {
+        $normalized = trim($email);
+        if ($normalized === '' || !str_contains($normalized, '@')) {
+            return '';
+        }
+
+        [$local, $domain] = explode('@', $normalized, 2);
+        $local = trim($local);
+        if ($local === '') {
+            return '***@' . $domain;
+        }
+
+        $prefix = substr($local, 0, 1);
+        return $prefix . str_repeat('*', max(2, strlen($local) - 1)) . '@' . $domain;
     }
 
     private function normalizeDiscountScope(mixed $value): string

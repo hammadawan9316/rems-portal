@@ -17,8 +17,10 @@ class QuotationContractModel extends Model
         'contract_id',
         'owner_name',
         'owner_signature',
+        'owner_signed_at',
         'recipient_name',
         'recipient_signature',
+        'recipient_signed_at',
     ];
 
     protected $useTimestamps = true;

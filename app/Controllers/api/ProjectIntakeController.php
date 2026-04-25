@@ -910,13 +910,23 @@ class ProjectIntakeController extends BaseApiController
                 'original_name' => $row['original_name'],
                 'mime_type' => $row['mime_type'],
                 'size_kb' => $row['size_kb'],
-                'download_url' => base_url('api/projects/files/' . $token),
+                'download_url' => $this->buildFileViewerUrl($token),
                 'password' => $plainPassword,
                 'password_protected' => true,
             ];
         }
 
         return $files;
+    }
+
+    private function buildFileViewerUrl(string $token): string
+    {
+        $appUrl = trim((string) getenv('APP_URL'));
+        if ($appUrl === '') {
+            $appUrl = rtrim((string) base_url(), '/');
+        }
+
+        return rtrim($appUrl, '/') . '/view-file?token=' . urlencode($token);
     }
 
     private function generateFilePassword(int $length = 10): string

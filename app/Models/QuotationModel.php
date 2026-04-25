@@ -19,6 +19,13 @@ class QuotationModel extends Model
         'description',
         'status',
         'notes',
+        'public_response_token_hash',
+        'public_response_token_issued_at',
+        'public_response_token_expires_at',
+        'public_response_token_used_at',
+        'response_reason',
+        'response_actor',
+        'response_at',
         'discount_type',
         'discount_value',
         'discount_scope',
@@ -38,6 +45,82 @@ class QuotationModel extends Model
     public function generateQuoteNumber(): string
     {
         return 'QT-' . date('Ymd') . '-' . strtoupper(bin2hex(random_bytes(3)));
+    }
+
+    /**
+     * @return array{token:string,issued_at:string,expires_at:string}|null
+     */
+    public function issuePublicResponseToken(int $quotationId, int $expiryDays = 7): ?array
+    {
+        if ($quotationId < 1) {
+            return null;
+        }
+
+        $quotation = $this->find($quotationId);
+        if (!is_array($quotation)) {
+            return null;
+        }
+
+        $token = bin2hex(random_bytes(32));
+        $issuedAt = date('Y-m-d H:i:s');
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+' . max(1, $expiryDays) . ' days'));
+
+        $updated = $this->update($quotationId, [
+            'public_response_token_hash' => hash('sha256', $token),
+            'public_response_token_issued_at' => $issuedAt,
+            'public_response_token_expires_at' => $expiresAt,
+            'public_response_token_used_at' => null,
+        ]);
+
+        if (!$updated) {
+            return null;
+        }
+
+        return [
+            'token' => $token,
+            'issued_at' => $issuedAt,
+            'expires_at' => $expiresAt,
+        ];
+    }
+
+    public function findActiveByPublicResponseToken(string $token): ?array
+    {
+        $plainToken = trim($token);
+        if ($plainToken === '') {
+            return null;
+        }
+
+        $quotation = $this->where('public_response_token_hash', hash('sha256', $plainToken))
+            ->where('public_response_token_used_at', null)
+            ->where('public_response_token_expires_at >', date('Y-m-d H:i:s'))
+            ->first();
+
+        return is_array($quotation) ? $quotation : null;
+    }
+
+    public function findByPublicResponseToken(string $token): ?array
+    {
+        $plainToken = trim($token);
+        if ($plainToken === '') {
+            return null;
+        }
+
+        $quotation = $this->where('public_response_token_hash', hash('sha256', $plainToken))
+            ->first();
+
+        return is_array($quotation) ? $quotation : null;
+    }
+
+    public function invalidatePublicResponseToken(int $quotationId): bool
+    {
+        if ($quotationId < 1) {
+            return false;
+        }
+
+        return $this->update($quotationId, [
+            'public_response_token_used_at' => date('Y-m-d H:i:s'),
+            'public_response_token_expires_at' => date('Y-m-d H:i:s'),
+        ]);
     }
 
     /**

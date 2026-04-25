@@ -8,6 +8,53 @@ use App\Models\QuotationModel;
 
 class QuotationContractController extends BaseApiController
 {
+    public function publicShow(string $token)
+    {
+        $context = $this->resolvePublicQuotationContract($token);
+        if (!is_array($context)) {
+            return $this->res->notFound('Quotation contract not found');
+        }
+
+        return $this->res->ok($this->formatPublicResponse($context), 'Quotation contract retrieved successfully');
+    }
+
+    public function publicSubmit(string $token)
+    {
+        $context = $this->resolvePublicQuotationContract($token);
+        if (!is_array($context)) {
+            return $this->res->notFound('Quotation contract not found');
+        }
+
+        $data = $this->getRequestData(false);
+        $payload = [
+            'recipient_name' => $this->normalizeNullableText($data['fullName'] ?? ($data['full_name'] ?? ($data['recipientName'] ?? ($data['recipient_name'] ?? null))), 190),
+            'recipient_signature' => $this->normalizeNullableText($data['signature'] ?? ($data['recipientSignature'] ?? ($data['recipient_signature'] ?? null)), 65535),
+            'recipient_signed_at' => $this->normalizeSignedAt($data['dateSigned'] ?? ($data['date_signed'] ?? ($data['signedAt'] ?? ($data['signed_at'] ?? null)))),
+        ];
+
+        $errors = $this->validatePublicSubmissionPayload($payload);
+        if ($errors !== []) {
+            return $this->res->validation($errors);
+        }
+
+        $quotationContractModel = new QuotationContractModel();
+        $quotationContractModel->update((int) ($context['assignment']['id'] ?? 0), $payload);
+
+        $saved = $quotationContractModel->find((int) ($context['assignment']['id'] ?? 0));
+        if (!is_array($saved)) {
+            return $this->res->serverError('Quotation contract could not be loaded.');
+        }
+
+        $contract = (new ContractModel())->findDetailed((int) ($saved['contract_id'] ?? 0));
+        if (!is_array($contract)) {
+            return $this->res->serverError('Contract template could not be loaded.');
+        }
+
+        $assignedClauses = $quotationContractModel->resolveAssignedClauses((int) ($saved['id'] ?? 0));
+
+        return $this->res->ok($this->formatResponse($contract, $saved, $assignedClauses), 'Quotation contract submitted successfully');
+    }
+
     public function showByQuotation(int $quotationId)
     {
         $quotation = (new QuotationModel())->find($quotationId);
@@ -54,6 +101,7 @@ class QuotationContractController extends BaseApiController
             'contract_id' => $contractId,
             'owner_name' => $this->normalizeNullableText($data['ownerName'] ?? ($contract['owner_name'] ?? null), 190),
             'owner_signature' => $this->normalizeNullableText($data['ownerSignature'] ?? null, 65535),
+            'owner_signed_at' => $this->normalizeSignedAt($data['ownerSignedAt'] ?? ($data['owner_signed_at'] ?? null)),
             'recipient_name' => $this->normalizeNullableText($data['recipientName'] ?? null, 190),
             'recipient_signature' => $this->normalizeNullableText($data['recipientSignature'] ?? null, 65535),
         ];
@@ -108,6 +156,10 @@ class QuotationContractController extends BaseApiController
 
         if (array_key_exists('ownerSignature', $data)) {
             $payload['owner_signature'] = $this->normalizeNullableText($data['ownerSignature'], 65535);
+        }
+
+        if (array_key_exists('ownerSignedAt', $data) || array_key_exists('owner_signed_at', $data)) {
+            $payload['owner_signed_at'] = $this->normalizeSignedAt($data['ownerSignedAt'] ?? $data['owner_signed_at']);
         }
 
         if (array_key_exists('recipientName', $data)) {
@@ -186,9 +238,36 @@ class QuotationContractController extends BaseApiController
             $errors['ownerName'] = 'Owner name is required and must not exceed 190 characters.';
         }
 
+        $ownerSignedAt = trim((string) ($payload['owner_signed_at'] ?? ''));
+        if ($ownerSignedAt !== '' && $this->normalizeSignedAt($ownerSignedAt) === null) {
+            $errors['ownerSignedAt'] = 'Owner signed date must be a valid date.';
+        }
+
         $recipientName = trim((string) ($payload['recipient_name'] ?? ''));
         if ($recipientName === '' || mb_strlen($recipientName) > 190) {
             $errors['recipientName'] = 'Recipient name is required and must not exceed 190 characters.';
+        }
+
+        return $errors;
+    }
+
+    private function validatePublicSubmissionPayload(array $payload): array
+    {
+        $errors = [];
+
+        $fullName = trim((string) ($payload['recipient_name'] ?? ''));
+        if ($fullName === '' || mb_strlen($fullName) > 190) {
+            $errors['fullName'] = 'Full name is required and must not exceed 190 characters.';
+        }
+
+        $signature = trim((string) ($payload['recipient_signature'] ?? ''));
+        if ($signature === '') {
+            $errors['signature'] = 'Signature is required.';
+        }
+
+        $signedAt = trim((string) ($payload['recipient_signed_at'] ?? ''));
+        if ($signedAt === '') {
+            $errors['dateSigned'] = 'Date signed is required.';
         }
 
         return $errors;
@@ -210,6 +289,25 @@ class QuotationContractController extends BaseApiController
         }
 
         return $text;
+    }
+
+    private function normalizeSignedAt(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $text = trim($value);
+        if ($text === '') {
+            return null;
+        }
+
+        $timestamp = strtotime($text);
+        if ($timestamp === false) {
+            return null;
+        }
+
+        return date('Y-m-d H:i:s', $timestamp);
     }
 
     /**
@@ -237,9 +335,104 @@ class QuotationContractController extends BaseApiController
             'clauses' => $clauses,
             'ownerName' => $this->normalizeNullableText($assignment['owner_name'] ?? null, 190),
             'ownerSignature' => $this->normalizeNullableText($assignment['owner_signature'] ?? null, 65535),
+            'ownerSignedAt' => $this->normalizeNullableText($assignment['owner_signed_at'] ?? null, 32),
             'recipientName' => $this->normalizeNullableText($assignment['recipient_name'] ?? null, 190),
             'recipientSignature' => $this->normalizeNullableText($assignment['recipient_signature'] ?? null, 65535),
+            'recipientSignedAt' => $this->normalizeNullableText($assignment['recipient_signed_at'] ?? null, 32),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    private function formatPublicResponse(array $context): array
+    {
+        return [
+            'quotation' => $context['quotation'] ?? null,
+            'contract' => $context['contract'] ?? null,
+            'assignment' => $context['assignment'] ?? null,
+            'clauses' => $context['clauses'] ?? [],
+            'requiredSubmissionFields' => [
+                'fullName',
+                'signature',
+                'dateSigned',
+            ],
+        ];
+    }
+
+    /**
+     * @return array{quotation:array<string,mixed>,contract:array<string,mixed>,assignment:array<string,mixed>,clauses:array<int,array<string,mixed>>}|null
+     */
+    private function resolvePublicQuotationContract(string $token): ?array
+    {
+        $quotation = (new QuotationModel())->findByPublicResponseToken($token);
+        if (!is_array($quotation)) {
+            return null;
+        }
+
+        if (!$this->isActivePublicToken($quotation)) {
+            return null;
+        }
+
+        $quotationContractModel = new QuotationContractModel();
+        $assignment = $quotationContractModel->findByQuotationId((int) ($quotation['id'] ?? 0));
+        if (!is_array($assignment)) {
+            return null;
+        }
+
+        $contract = (new ContractModel())->findDetailed((int) ($assignment['contract_id'] ?? 0));
+        if (!is_array($contract)) {
+            return null;
+        }
+
+        $clauses = $quotationContractModel->resolveAssignedClauses((int) ($assignment['id'] ?? 0));
+
+        unset($quotation['public_response_token_hash'], $quotation['public_response_token_issued_at'], $quotation['public_response_token_expires_at'], $quotation['public_response_token_used_at']);
+        unset($quotation['square_order_id'], $quotation['square_invoice_id'], $quotation['square_status'], $quotation['square_error'], $quotation['square_synced_at']);
+
+        $customer = model(\App\Models\CustomerModel::class)->find((int) ($quotation['customer_id'] ?? 0));
+        if (is_array($customer)) {
+            $quotation['customer'] = [
+                'id' => (int) ($customer['id'] ?? 0) ?: null,
+                'name' => trim((string) ($customer['name'] ?? '')) ?: null,
+                'email' => trim((string) ($customer['email'] ?? '')) ?: null,
+                'phone' => trim((string) ($customer['phone'] ?? '')) ?: null,
+                'company' => trim((string) ($customer['company'] ?? '')) ?: null,
+            ];
+        }
+
+        $quotation['requiredSubmissionFields'] = ['fullName', 'signature', 'dateSigned'];
+
+        return [
+            'quotation' => $quotation,
+            'contract' => $contract,
+            'assignment' => $assignment,
+            'clauses' => $clauses,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     */
+    private function isActivePublicToken(array $quotation): bool
+    {
+        $usedAt = trim((string) ($quotation['public_response_token_used_at'] ?? ''));
+        if ($usedAt !== '') {
+            return false;
+        }
+
+        $expiresAt = trim((string) ($quotation['public_response_token_expires_at'] ?? ''));
+        if ($expiresAt === '') {
+            return false;
+        }
+
+        $expiresTs = strtotime($expiresAt);
+        if ($expiresTs === false) {
+            return false;
+        }
+
+        return $expiresTs > time();
     }
 
     /**

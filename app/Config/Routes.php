@@ -30,6 +30,10 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
 
     // Public project intake routes
     $routes->get('projects/files/(:segment)', 'ProjectIntakeController::downloadFile/$1');
+    $routes->get('get_quotation_public_details(:segment)', 'QuotationController::publicShow/$1');
+    $routes->post('customer_responded(:segment)', 'QuotationController::publicRespond/$1');
+    $routes->get('quotations_contract(:segment)', 'QuotationContractController::publicShow/$1');
+    $routes->post('quotations_contract_signature(:segment)/contract', 'QuotationContractController::publicSubmit/$1');
 
     // Public category and service routes
     $routes->get('categories', 'CategoryController::index');
@@ -79,6 +83,7 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
             $routes->post('quotations/submit', 'QuotationController::submit');
             $routes->post('quotations/(:num)', 'QuotationController::update/$1');
             $routes->patch('quotations/(:num)', 'QuotationController::update/$1');
+            $routes->post('send_quotation_to_customer/(:num)', 'QuotationController::sendPublicResponseLink/$1');
             $routes->post('create_square_invoice_from_quotation/(:num)', 'QuotationController::createSquareInvoice/$1');
             $routes->get('download_quotations_pdf/(:num)', 'QuotationController::downloadPdf/$1');
             $routes->get('quotations/(:num)', 'QuotationController::show/$1');

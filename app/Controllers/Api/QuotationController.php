@@ -93,7 +93,9 @@ class QuotationController extends BaseApiController
                 ->orderBy('request_project_index', 'ASC')
                 ->findAll();
 
-            $projectItems = $this->extractProjectItemsFromRequest($requestProjects);
+            $projectItems = array_key_exists('projects', $data) || $this->looksLikeProjectPayload($data)
+                ? $this->extractProjectItems($data)
+                : $this->extractProjectItemsFromRequest($requestProjects);
         } else {
             $projectItems = $this->extractProjectItems($data);
         }

@@ -25,6 +25,20 @@ class QuotationContractController extends BaseApiController
             return $this->res->notFound('Quotation contract not found');
         }
 
+        $quotationStatus = strtolower(trim((string) (($context['quotation']['status'] ?? ''))));
+        if ($quotationStatus !== 'accepted') {
+            return $this->response
+                ->setStatusCode(409)
+                ->setJSON([
+                    'status' => false,
+                    'message' => 'Contract can only be submitted after quotation is accepted.',
+                    'code' => 409,
+                    'data' => [
+                        'status' => $quotationStatus,
+                    ],
+                ]);
+        }
+
         $data = $this->getRequestData(false);
         $payload = [
             'recipient_name' => $this->normalizeNullableText($data['fullName'] ?? ($data['full_name'] ?? ($data['recipientName'] ?? ($data['recipient_name'] ?? null))), 190),
@@ -39,6 +53,11 @@ class QuotationContractController extends BaseApiController
 
         $quotationContractModel = new QuotationContractModel();
         $quotationContractModel->update((int) ($context['assignment']['id'] ?? 0), $payload);
+
+        $quotationId = (int) ($context['quotation']['id'] ?? 0);
+        if ($quotationId > 0) {
+            (new QuotationModel())->invalidatePublicResponseToken($quotationId);
+        }
 
         $saved = $quotationContractModel->find((int) ($context['assignment']['id'] ?? 0));
         if (!is_array($saved)) {

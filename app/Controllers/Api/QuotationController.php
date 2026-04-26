@@ -482,7 +482,6 @@ class QuotationController extends BaseApiController
             'response_actor' => self::RESPONSE_ACTOR_CUSTOMER,
             'response_at' => $responseAt,
         ]);
-        $quotationModel->invalidatePublicResponseToken((int) $quotation['id']);
 
         $updatedQuotation = $quotationModel->find((int) $quotation['id']);
         if (!is_array($updatedQuotation)) {

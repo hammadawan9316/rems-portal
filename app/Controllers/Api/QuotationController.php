@@ -51,6 +51,7 @@ class QuotationController extends BaseApiController
      */
     private const CUSTOMER_ALLOWED_RESPONSE_STATUSES = [
         self::STATUS_REQUESTED,
+        self::STATUS_DRAFT,
         self::STATUS_PENDING,
         self::STATUS_REJECTED,
     ];
@@ -770,6 +771,7 @@ class QuotationController extends BaseApiController
         $quotation['project_count'] = count($projects);
 
         $assignment = model(QuotationContractModel::class)->findByQuotationId($id);
+        $quotation['contract_id'] = is_array($assignment) ? ((int) ($assignment['contract_id'] ?? 0) ?: null) : null;
         $quotation['quotation_contract_id'] = is_array($assignment) ? ((int) ($assignment['id'] ?? 0) ?: null) : null;
 
         return $this->res->ok($quotation, 'Quotation retrieved successfully');

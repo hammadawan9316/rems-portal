@@ -26,6 +26,7 @@ class QuotationController extends BaseApiController
     private const PUBLIC_TOKEN_EXPIRY_DAYS = 7;
 
     private const STATUS_REQUESTED = 'requested';
+    private const STATUS_DRAFT = 'draft';
     private const STATUS_PENDING = 'pending';
     private const STATUS_ACCEPTED = 'accepted';
     private const STATUS_REJECTED = 'rejected';
@@ -37,6 +38,7 @@ class QuotationController extends BaseApiController
      */
     private const ALLOWED_STATUSES = [
         self::STATUS_REQUESTED,
+        self::STATUS_DRAFT,
         self::STATUS_PENDING,
         self::STATUS_ACCEPTED,
         self::STATUS_REJECTED,
@@ -50,6 +52,7 @@ class QuotationController extends BaseApiController
     private const CUSTOMER_ALLOWED_RESPONSE_STATUSES = [
         self::STATUS_REQUESTED,
         self::STATUS_PENDING,
+        self::STATUS_REJECTED,
     ];
 
     public function store()
@@ -152,7 +155,7 @@ class QuotationController extends BaseApiController
             'source_request_id' => $requestId > 0 ? $requestId : null,
             'quote_number' => $quoteNumber,
             'description' => $this->normalizeNullableText($data['description'] ?? ($data['title'] ?? ($request['description'] ?? null))),
-            'status' => self::STATUS_PENDING,
+            'status' => self::STATUS_DRAFT,
             'notes' => $this->normalizeNullableText($data['notes'] ?? ($request['notes'] ?? null)),
             'submitted_at' => date('Y-m-d H:i:s'),
             'discount_type' => $this->normalizeDiscountType($data['discount_type'] ?? ($data['discountType'] ?? null)),
@@ -349,7 +352,6 @@ class QuotationController extends BaseApiController
         $plainToken = (string) ($tokenResult['token'] ?? '');
         $expiresAt = (string) ($tokenResult['expires_at'] ?? '');
         $quotationPreviewUrl = $this->buildPublicQuotationPreviewUrl($plainToken);
-        $contractPreviewUrl = $this->buildPublicContractPreviewUrl($plainToken);
         $quoteNumber = trim((string) ($quotation['quote_number'] ?? ''));
         $recipientName = trim((string) ($customer['name'] ?? ''));
         $recipientName = $recipientName !== '' ? $recipientName : 'Customer';
@@ -364,8 +366,7 @@ class QuotationController extends BaseApiController
             . '<p style="margin:0 0 14px 0;"><strong>Link expires:</strong> ' . esc($expiryHuman) . '</p>'
             . '<p style="margin:0 0 8px 0;"><strong>Quotation Preview URL:</strong></p>'
             . '<p style="margin:0 0 14px 0;word-break:break-all;"><a href="' . esc($quotationPreviewUrl) . '">' . esc($quotationPreviewUrl) . '</a></p>'
-            . '<p style="margin:0 0 8px 0;"><strong>Contract Preview URL:</strong></p>'
-            . '<p style="margin:0;word-break:break-all;"><a href="' . esc($contractPreviewUrl) . '">' . esc($contractPreviewUrl) . '</a></p>';
+            . '<p style="margin:0 0 8px 0;"><strong>Contract Preview URL:</strong></p>';
 
         $body = $emailQueue->renderTemplate([
             'subject' => $subject,
@@ -385,7 +386,6 @@ class QuotationController extends BaseApiController
             'queue_job_id' => $queueId,
             'expires_at' => $expiresAt,
             'quotation_preview_url' => $quotationPreviewUrl,
-            'contract_preview_url' => $contractPreviewUrl,
             'customer_email_masked' => $this->maskEmail($customerEmail),
         ], 'Public quotation response email queued successfully.');
     }
@@ -514,6 +514,8 @@ class QuotationController extends BaseApiController
         $projectModel = new ProjectModel();
         $projectServiceModel = new ProjectServiceModel();
         $customerModel = new CustomerModel();
+        $quotationContractModel = new QuotationContractModel();
+        $contractModel = new ContractModel();
 
         $quotation = $quotationModel->find($id);
         if (!is_array($quotation)) {
@@ -585,6 +587,23 @@ class QuotationController extends BaseApiController
             $quotationPayload['discount_scope'] = $this->normalizeDiscountScope($data['discount_scope'] ?? ($data['discountScope'] ?? null));
         }
 
+        $contractAssignmentRequested = array_key_exists('contract_id', $data) || array_key_exists('contractId', $data);
+        $contractToAssign = null;
+
+        if ($contractAssignmentRequested) {
+            $contractId = (int) ($data['contract_id'] ?? ($data['contractId'] ?? 0));
+            if ($contractId < 1) {
+                return $this->res->badRequest('Contract id is required.', [
+                    'contract_id' => 'A valid contract id is required.',
+                ]);
+            }
+
+            $contractToAssign = $contractModel->findDetailed($contractId);
+            if (!is_array($contractToAssign)) {
+                return $this->res->notFound('Contract template not found.');
+            }
+        }
+
         $shouldReplaceProjects = isset($data['projects']) || $this->looksLikeProjectPayload($data);
         $projectItems = [];
 
@@ -609,7 +628,7 @@ class QuotationController extends BaseApiController
             $projectItems = $taxonomyResolution['projects'] ?? $projectItems;
         }
 
-        if ($quotationPayload === [] && !$shouldReplaceProjects) {
+        if ($quotationPayload === [] && !$shouldReplaceProjects && !$contractAssignmentRequested) {
             return $this->res->badRequest('No quotation fields supplied to update.');
         }
 
@@ -668,6 +687,17 @@ class QuotationController extends BaseApiController
             }
         }
 
+        if ($contractAssignmentRequested && is_array($contractToAssign)) {
+            $savedAssignment = $quotationContractModel->saveAssignmentWithClauses([
+                'quotation_id' => $id,
+                'contract_id' => (int) ($contractToAssign['id'] ?? 0),
+            ], $this->extractTemplateClauseIds($contractToAssign));
+
+            if (!is_array($savedAssignment)) {
+                return $this->res->serverError('Contract could not be assigned to quotation.');
+            }
+        }
+
         $updatedQuotation = $quotationModel->find($id);
         if (!is_array($updatedQuotation)) {
             return $this->res->notFound('Quotation not found');
@@ -681,6 +711,10 @@ class QuotationController extends BaseApiController
         $updatedQuotation = $this->formatQuotationForResponse($updatedQuotation, $customer);
         $updatedQuotation['projects'] = $this->formatProjectsForResponse($updatedProjects);
         $updatedQuotation['project_count'] = count($updatedProjects);
+
+        $assignment = model(QuotationContractModel::class)->findByQuotationId($id);
+        $updatedQuotation['contract_id'] = is_array($assignment) ? ((int) ($assignment['contract_id'] ?? 0) ?: null) : null;
+        $updatedQuotation['quotation_contract_id'] = is_array($assignment) ? ((int) ($assignment['id'] ?? 0) ?: null) : null;
 
         return $this->res->ok($updatedQuotation, 'Quotation updated successfully');
     }
@@ -869,7 +903,7 @@ class QuotationController extends BaseApiController
             $project['category'] = $categoriesById[$categoryId] ?? '';
             $project['services'] = $servicesByProject[$projectId] ?? [];
             $project['service_ids'] = $serviceIdsByProject[$projectId] ?? [];
-            $project['payment_type'] = (string) ($project['payment_type'] ?? 'fixed_rate');
+            $project['payment_type'] = $project['payment_type'];
             $project['hourly_hours'] = $project['hourly_hours'] ?? null;
 
             unset($project['nature'], $project['trades']);
@@ -916,7 +950,7 @@ class QuotationController extends BaseApiController
         return [
             'project_title' => trim((string) ($project['project_title'] ?? '')),
             'project_description' => trim((string) ($project['project_description'] ?? ($project['scope'] ?? ''))),
-            'estimated_amount' => $this->normalizeMoneyValue($project['estimated_amount'] ?? ($project['amount'] ?? null)),
+            'estimated_amount' => $this->normalizeMoneyValue($project['estimated_amount'] ?? ($project['estimatedAmount'] ?? ($project['amount'] ?? null))),
             'category_id' => $this->normalizeCategoryId($project),
             'service_ids' => $this->normalizeServiceIds($project['services'] ?? ($project['service_ids'] ?? [])),
             'payment_type' => $this->normalizePaymentType($project['payment_type'] ?? ($project['paymentType'] ?? 'fixed_rate')),
@@ -1228,7 +1262,16 @@ class QuotationController extends BaseApiController
     private function normalizePaymentType(mixed $value): string
     {
         $paymentType = strtolower(trim((string) $value));
-        return in_array($paymentType, ['fixed_rate', 'hourly'], true) ? $paymentType : 'fixed_rate';
+
+        if (in_array($paymentType, ['hourly', 'hourly_rate', 'hourly-rate', 'hourlyrate'], true)) {
+            return 'hourly';
+        }
+
+        if (in_array($paymentType, ['fixed_rate', 'fixed', 'fixed-rate', 'fixedrate'], true)) {
+            return 'fixed_rate';
+        }
+
+        return 'fixed_rate';
     }
 
     private function normalizeDiscountType(mixed $value): ?string
@@ -1511,13 +1554,6 @@ class QuotationController extends BaseApiController
         ]);
     }
 
-    private function buildPublicContractPreviewUrl(string $token): string
-    {
-        return $this->buildFrontendUrl('/contract-preview', [
-            'token' => $token,
-        ]);
-    }
-
     /**
      * @param array<string, string> $query
      */
@@ -1574,7 +1610,27 @@ class QuotationController extends BaseApiController
 
     private function normalizeMoneyValue(mixed $value): ?string
     {
-        return is_numeric($value) ? number_format((float) $value, 2, '.', '') : null;
+        if (is_int($value) || is_float($value)) {
+            return number_format((float) $value, 2, '.', '');
+        }
+
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $normalized = trim($value);
+        if ($normalized === '') {
+            return null;
+        }
+
+        $normalized = str_replace(',', '', $normalized);
+        $normalized = preg_replace('/[^0-9.\-]/', '', $normalized) ?? '';
+
+        if ($normalized === '' || !is_numeric($normalized)) {
+            return null;
+        }
+
+        return number_format((float) $normalized, 2, '.', '');
     }
 
     private function normalizeDecimalValue(mixed $value): ?string

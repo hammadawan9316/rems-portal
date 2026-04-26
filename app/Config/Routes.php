@@ -7,6 +7,7 @@ use CodeIgniter\Router\RouteCollection;
  */
 $routes->get('/', 'Home::index');
 $routes->setAutoRoute(true); // optional but helpful for testing
+$routes->get('uploads/(.*)', 'UploadController::show/$1');
 
 // Catch API preflight requests so browsers don't get a route-level 404 on OPTIONS.
 $routes->options('api/(.*)', static function () {

@@ -321,7 +321,7 @@ class QuotationController extends BaseApiController
 
         $status = strtolower(trim((string) ($quotation['status'] ?? '')));
         if (!in_array($status, self::CUSTOMER_ALLOWED_RESPONSE_STATUSES, true)) {
-            return $this->res->badRequest('Public response link can only be sent for quotations in requested or pending status.');
+            return $this->res->badRequest('Public response link can only be sent for quotations in requested, draft, pending or rejected status.');
         }
 
         if ($status !== self::STATUS_PENDING) {

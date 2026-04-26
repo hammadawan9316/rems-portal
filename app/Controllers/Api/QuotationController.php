@@ -406,6 +406,8 @@ class QuotationController extends BaseApiController
 
         $customer = model(CustomerModel::class)->find((int) ($quotation['customer_id'] ?? 0));
         $quotation = $this->formatQuotationForResponse($quotation, is_array($customer) ? $customer : null);
+        $assignment = model(QuotationContractModel::class)->findByQuotationId((int) ($quotation['id'] ?? 0));
+        $quotation['quotation_contract_id'] = is_array($assignment) ? ((int) ($assignment['id'] ?? 0) ?: null) : null;
         $quotation = $this->sanitizeQuotationForPublicResponse($quotation);
 
         $projects = $projectModel
@@ -489,6 +491,8 @@ class QuotationController extends BaseApiController
 
         $customer = model(CustomerModel::class)->find((int) ($updatedQuotation['customer_id'] ?? 0));
         $updatedQuotation = $this->formatQuotationForResponse($updatedQuotation, is_array($customer) ? $customer : null);
+        $assignment = model(QuotationContractModel::class)->findByQuotationId((int) ($updatedQuotation['id'] ?? 0));
+        $updatedQuotation['quotation_contract_id'] = is_array($assignment) ? ((int) ($assignment['id'] ?? 0) ?: null) : null;
         $updatedQuotation = $this->sanitizeQuotationForPublicResponse($updatedQuotation);
 
         $projects = $projectModel

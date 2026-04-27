@@ -355,6 +355,9 @@ class QuotationController extends BaseApiController
         $plainToken = (string) ($tokenResult['token'] ?? '');
         $expiresAt = (string) ($tokenResult['expires_at'] ?? '');
         $quotationPreviewUrl = $this->buildPublicQuotationPreviewUrl($plainToken);
+        $acceptUrl = $this->buildPublicQuotationActionUrl($plainToken, 'accept');
+        $rejectUrl = $this->buildPublicQuotationActionUrl($plainToken, 'reject');
+        $contractPreviewUrl = $this->buildPublicContractPreviewUrl($plainToken);
         $quoteNumber = trim((string) ($quotation['quote_number'] ?? ''));
         $recipientName = trim((string) ($customer['name'] ?? ''));
         $recipientName = $recipientName !== '' ? $recipientName : 'Customer';
@@ -363,13 +366,33 @@ class QuotationController extends BaseApiController
         $subject = 'Quotation Response Requested' . ($quoteNumber !== '' ? ' - ' . $quoteNumber : '');
         $expiryHuman = $this->formatDateTimeForEmail($expiresAt);
 
-        $contentHtml = '<p style="margin:0 0 14px 0;">Your quotation is ready for review.</p>'
-            . '<p style="margin:0 0 14px 0;">Please use the secure links below to review your quotation and related contract.</p>'
-            . '<p style="margin:0 0 8px 0;"><strong>Quotation:</strong> ' . esc($quoteNumber !== '' ? $quoteNumber : ('#' . $id)) . '</p>'
-            . '<p style="margin:0 0 14px 0;"><strong>Link expires:</strong> ' . esc($expiryHuman) . '</p>'
-            . '<p style="margin:0 0 8px 0;"><strong>Quotation Preview URL:</strong></p>'
-            . '<p style="margin:0 0 14px 0;word-break:break-all;"><a href="' . esc($quotationPreviewUrl) . '">' . esc($quotationPreviewUrl) . '</a></p>'
-            . '<p style="margin:0 0 8px 0;"><strong>Contract Preview URL:</strong></p>';
+        $formattedQuotation = $this->formatQuotationForResponse($quotation, $customer);
+        $projects = model(ProjectModel::class)
+            ->where('quotation_id', $id)
+            ->orderBy('id', 'ASC')
+            ->findAll();
+        $projects = $this->formatProjectsForResponse($projects);
+
+        $assignment = model(QuotationContractModel::class)->findByQuotationId($id);
+        $contractName = null;
+        $contractTemplateName = null;
+        if (is_array($assignment)) {
+            $contract = (new ContractModel())->findDetailed((int) ($assignment['contract_id'] ?? 0));
+            if (is_array($contract)) {
+                $contractName = $this->normalizeNullableText($contract['contract_name'] ?? null);
+                $contractTemplateName = $this->normalizeNullableText($contract['template_name'] ?? null);
+            }
+        }
+
+        $contentHtml = $this->buildQuotationDocumentHtml($formattedQuotation, $projects, [
+            'showActions' => true,
+            'acceptUrl' => $acceptUrl,
+            'rejectUrl' => $rejectUrl,
+            'contractUrl' => $contractPreviewUrl,
+            'contractName' => $contractName,
+            'contractTemplateName' => $contractTemplateName,
+            'expiryLabel' => $expiryHuman,
+        ]);
 
         $body = $emailQueue->renderTemplate([
             'subject' => $subject,
@@ -389,6 +412,9 @@ class QuotationController extends BaseApiController
             'queue_job_id' => $queueId,
             'expires_at' => $expiresAt,
             'quotation_preview_url' => $quotationPreviewUrl,
+            'quotation_accept_url' => $acceptUrl,
+            'quotation_reject_url' => $rejectUrl,
+            'contract_preview_url' => $contractPreviewUrl,
             'customer_email_masked' => $this->maskEmail($customerEmail),
         ], 'Public quotation response email queued successfully.');
     }
@@ -655,8 +681,8 @@ class QuotationController extends BaseApiController
                 ->orderBy('id', 'ASC')
                 ->findAll();
 
-            $existingProjectIds = array_map(static fn (array $project): int => (int) ($project['id'] ?? 0), $existingProjects);
-            $existingProjectIds = array_values(array_filter($existingProjectIds, static fn (int $projectId): bool => $projectId > 0));
+            $existingProjectIds = array_map(static fn(array $project): int => (int) ($project['id'] ?? 0), $existingProjects);
+            $existingProjectIds = array_values(array_filter($existingProjectIds, static fn(int $projectId): bool => $projectId > 0));
 
             if ($existingProjectIds !== []) {
                 $projectServiceModel->whereIn('project_id', $existingProjectIds)->delete();
@@ -871,11 +897,11 @@ class QuotationController extends BaseApiController
             return [];
         }
 
-        $projectIds = array_map(static fn (array $project): int => (int) ($project['id'] ?? 0), $projects);
-        $projectIds = array_values(array_filter($projectIds, static fn (int $id): bool => $id > 0));
+        $projectIds = array_map(static fn(array $project): int => (int) ($project['id'] ?? 0), $projects);
+        $projectIds = array_values(array_filter($projectIds, static fn(int $id): bool => $id > 0));
 
-        $categoryIds = array_map(static fn (array $project): int => (int) ($project['category_id'] ?? 0), $projects);
-        $categoryIds = array_values(array_unique(array_filter($categoryIds, static fn (int $id): bool => $id > 0)));
+        $categoryIds = array_map(static fn(array $project): int => (int) ($project['category_id'] ?? 0), $projects);
+        $categoryIds = array_values(array_unique(array_filter($categoryIds, static fn(int $id): bool => $id > 0)));
 
         $categoriesById = [];
         if ($categoryIds !== []) {
@@ -1128,7 +1154,7 @@ class QuotationController extends BaseApiController
         }
 
         $items = array_map('intval', $value);
-        $items = array_values(array_unique(array_filter($items, static fn (int $id): bool => $id > 0)));
+        $items = array_values(array_unique(array_filter($items, static fn(int $id): bool => $id > 0)));
 
         return $items;
     }
@@ -1231,7 +1257,7 @@ class QuotationController extends BaseApiController
                     continue;
                 }
 
-                $serviceCategoryIds = array_map(static fn (array $categoryRow): int => (int) ($categoryRow['id'] ?? 0), is_array($service['categories'] ?? null) ? $service['categories'] : []);
+                $serviceCategoryIds = array_map(static fn(array $categoryRow): int => (int) ($categoryRow['id'] ?? 0), is_array($service['categories'] ?? null) ? $service['categories'] : []);
                 if (!in_array($categoryId, $serviceCategoryIds, true)) {
                     $invalid[] = (string) $rawService;
                     continue;
@@ -1252,7 +1278,7 @@ class QuotationController extends BaseApiController
             $item['category'] = trim((string) ($category['name'] ?? ''));
             $item['services'] = array_values(array_unique($serviceNames));
             $item['category_id'] = $categoryId;
-            $item['service_ids'] = array_values(array_unique(array_filter($serviceIds, static fn (int $id): bool => $id > 0)));
+            $item['service_ids'] = array_values(array_unique(array_filter($serviceIds, static fn(int $id): bool => $id > 0)));
 
             $resolved[] = $item;
         }
@@ -1304,62 +1330,427 @@ class QuotationController extends BaseApiController
      */
     private function buildQuotationPdfHtml(array $quotation, array $projects): string
     {
-        $quoteNumber = trim((string) ($quotation['quote_number'] ?? ''));
-        $description = trim((string) ($quotation['description'] ?? ''));
-        $status = trim((string) ($quotation['status'] ?? ''));
-        $customer = is_array($quotation['customer'] ?? null) ? $quotation['customer'] : [];
-        $customerName = trim((string) ($customer['name'] ?? ''));
-        $customerEmail = trim((string) ($customer['email'] ?? ''));
-        $customerPhone = trim((string) ($customer['phone'] ?? ''));
-        $customerCompany = trim((string) ($customer['company'] ?? ''));
-        $logoDataUri = $this->getLogoDataUri();
+        $quotationId = (int) ($quotation['id'] ?? 0);
+        $assignment = $quotationId > 0 ? model(QuotationContractModel::class)->findByQuotationId($quotationId) : null;
+        $contractName = null;
+        $contractTemplateName = null;
 
-        $headerHtml = '<div style="text-align:center;margin-bottom:18px;">';
-        if ($logoDataUri !== null) {
-            $headerHtml .= '<img src="' . esc($logoDataUri) . '" alt="Remote Estimation" style="max-width:220px;height:auto;display:block;margin:0 auto 10px auto;">';
+        if (is_array($assignment)) {
+            $contract = (new ContractModel())->findDetailed((int) ($assignment['contract_id'] ?? 0));
+            if (is_array($contract)) {
+                $contractName = $this->normalizeNullableText($contract['contract_name'] ?? null);
+                $contractTemplateName = $this->normalizeNullableText($contract['template_name'] ?? null);
+            }
         }
-        $headerHtml .= '<div style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#6b7280;">Remote Estimation</div>';
-        $headerHtml .= '</div>';
 
-        $rows = '';
+        return '<html><head><meta charset="utf-8"><title>Quotation PDF</title></head><body style="margin:0;padding:0;background:#f8fafc;">'
+            . $this->buildQuotationDocumentHtml($quotation, $projects, [
+                'showActions' => false,
+                'contractName' => $contractName,
+                'contractTemplateName' => $contractTemplateName,
+            ])
+            . '</body></html>';
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     * @param array<int, array<string, mixed>> $projects
+     * @param array<string, mixed> $options
+     */
+    private function buildQuotationDocumentHtml(array $quotation, array $projects, array $options = []): string
+    {
+        $quoteNumber = trim((string) ($quotation['quote_number'] ?? ''));
+        $status = strtolower(trim((string) ($quotation['status'] ?? 'pending')));
+        $description = trim((string) ($quotation['description'] ?? ''));
+        $notes = trim((string) ($quotation['notes'] ?? ''));
+        $createdAt = trim((string) ($quotation['created_at'] ?? ''));
+        $expiryLabel = trim((string) ($options['expiryLabel'] ?? ''));
+        $quoteTitle = $quoteNumber !== '' ? $quoteNumber : ('#' . (int) ($quotation['id'] ?? 0));
+        $quoteDateLabel = $createdAt !== '' ? date('M d, Y', strtotime($createdAt) ?: time()) : date('M d, Y');
+
+        $showActions = (bool) ($options['showActions'] ?? false);
+        $acceptUrl = trim((string) ($options['acceptUrl'] ?? ''));
+        $rejectUrl = trim((string) ($options['rejectUrl'] ?? ''));
+        $contractUrl = trim((string) ($options['contractUrl'] ?? ''));
+        $contractName = trim((string) ($options['contractName'] ?? ''));
+        $contractTemplateName = trim((string) ($options['contractTemplateName'] ?? ''));
+
+        $customer = is_array($quotation['customer'] ?? null) ? $quotation['customer'] : [];
+        $customerName = trim((string) ($customer['name'] ?? 'N/A'));
+        $customerEmail = trim((string) ($customer['email'] ?? 'N/A'));
+        $customerPhone = trim((string) ($customer['phone'] ?? 'N/A'));
+        $customerCompany = trim((string) ($customer['company'] ?? 'N/A'));
+
+        $logoDataUri = $this->getLogoDataUri();
+        $totals = $this->calculateQuotationTotals($quotation, $projects);
+
+        $companyName = 'Remote Estimation LLC';
+        $companyTagline = 'Precision Takeoffs - Complete Cost Estimates';
+        $companyAddressLine1 = '4820 Commerce Drive, Suite 310';
+        $companyAddressLine2 = 'Dallas, TX 75201';
+        $companyContact = '(214) 555-0183 - info@apexestimating.com';
+        $companyEin = 'EIN: 47-2318540';
+        $companyWebsite = 'www.apexestimating.com';
+
+        $statusColors = [
+            self::STATUS_ACCEPTED => ['#14532d', '#dcfce7'],
+            self::STATUS_REJECTED => ['#7f1d1d', '#fee2e2'],
+            self::STATUS_PENDING => ['#7c2d12', '#ffedd5'],
+            self::STATUS_DRAFT => ['#1e3a8a', '#dbeafe'],
+        ];
+        [$statusTextColor, $statusBgColor] = $statusColors[$status] ?? ['#374151', '#e5e7eb'];
+
+        $projectsHtml = '';
+        $summaryLines = '';
+        $projectIndex = 0;
+
         foreach ($projects as $project) {
             if (!is_array($project)) {
                 continue;
             }
 
-            $rows .= '<tr>'
-                . '<td style="border:1px solid #ddd;padding:8px;">' . esc((string) ($project['project_title'] ?? '')) . '</td>'
-                . '<td style="border:1px solid #ddd;padding:8px;">' . esc((string) ($project['category'] ?? '')) . '</td>'
-                . '<td style="border:1px solid #ddd;padding:8px;">' . esc(implode(', ', is_array($project['services'] ?? null) ? $project['services'] : [])) . '</td>'
-                . '<td style="border:1px solid #ddd;padding:8px;text-align:right;">' . esc((string) ($project['estimated_amount'] ?? '')) . '</td>'
+            $projectIndex++;
+
+            $services = is_array($project['services'] ?? null) ? $project['services'] : [];
+            $amount = $this->formatCurrency($this->toFloat($project['estimated_amount'] ?? 0));
+
+            $projectTitle = trim((string) ($project['project_title'] ?? 'Project'));
+            $categoryName = trim((string) ($project['category'] ?? 'General Scope'));
+            $projectDescription = trim((string) ($project['project_description'] ?? ''));
+            $estimateType = trim((string) ($project['estimate_type'] ?? 'Detailed Estimate'));
+            $deadlineDate = trim((string) ($project['deadline_date'] ?? ($project['delivery_date'] ?? ($project['deadline'] ?? ''))));
+            $projectDateLabel = $deadlineDate !== '' ? date('M j, Y', strtotime($deadlineDate) ?: time()) : $quoteDateLabel;
+            $paymentType = strtolower(trim((string) ($project['payment_type'] ?? 'fixed_rate')));
+            $hours = $this->toFloat($project['hourly_hours'] ?? 0);
+            $rate = $this->toFloat($project['hourly_rate'] ?? 0);
+
+            $pricingMeta = 'Fixed price';
+            if ($paymentType === 'hourly' && $hours > 0 && $rate > 0) {
+                $pricingMeta = number_format($hours, 0) . ' hrs x ' . $this->formatCurrency($rate) . '/hr';
+            }
+
+            $serviceBadges = '';
+            foreach ($services as $service) {
+                $serviceText = trim((string) $service);
+                if ($serviceText === '') {
+                    continue;
+                }
+
+                $serviceBadges .= '<span style="display:inline-block;padding:4px 9px;margin:10px 6px 6px 0;border-radius:8px;border:1px solid #f2c6b9;background:#fff4ef;color:#cc5b37;font-size:14px;font-weight:600;">' . esc($serviceText) . '</span>';
+            }
+
+            if ($serviceBadges === '') {
+                $serviceBadges = '<span style="display:inline-block;padding:4px 9px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;color:#6b7280;font-size:14px;">No tagged services</span>';
+            }
+
+            $projectMetaLine = esc($estimateType) . '  -  #' . esc((string) ((int) ($project['id'] ?? $projectIndex))) . '  -  ' . esc($projectDateLabel);
+            $projectBlurb = $projectDescription !== ''
+                ? esc($projectDescription)
+                : 'Scope details are included in this project estimate package.';
+
+            $projectsHtml .= '
+                <tr>
+                <td style="padding:0 0 16px 0;">
+
+                    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:8px;background:#ffffff;">
+                    
+                    <!-- TOP ROW -->
+                    <tr>
+                        <td style="padding:16px;">
+
+                        <table width="100%">
+                            <tr>
+
+                            <!-- INDEX -->
+                            <td width="40" valign="top">
+                                <div style="width:26px;height:26px;border-radius:6px;background:#f1f5f9;text-align:center;line-height:26px;font-size:12px;font-weight:bold;color:#334155;">
+                                ' . $projectIndex . '
+                                </div>
+                            </td>
+
+                            <!-- CONTENT -->
+                            <td valign="top">
+
+                                <div style="font-size:15px;font-weight:700;color:#0f172a;">
+                                ' . esc($projectTitle) . '
+                                </div>
+
+                                <div style="font-size:14px;color:#64748b;margin:4px 0 8px 0; padding-bottom:10px;">
+                                ' . $projectMetaLine . '
+                                </div>
+
+                                <div style="margin-bottom:8px; display:flex; flex-wrap:wrap; gap:6px;">
+                                ' . $serviceBadges . '
+                                </div>
+
+                                <div style="font-size:12px;color:#6b7280;">
+                                Category: ' . esc($categoryName) . '
+                                </div>
+
+                            </td>
+
+                            <!-- PRICE -->
+                            <td width="140" align="right" valign="top">
+
+                                <div style="font-size:16px;font-weight:700;color:#111827;">
+                                ' . esc($amount) . '
+                                </div>
+
+                                <div style="font-size:12px;color:#6b7280;margin-top:6px;">
+                                ' . esc($pricingMeta) . '
+                                </div>
+
+                            </td>
+
+                            </tr>
+                        </table>
+
+                        </td>
+                    </tr>
+
+                    <!-- DESCRIPTION ROW -->
+                    <tr>
+                        <td style="padding:10px 16px 14px 16px;border-top:1px solid #f1f5f9;">
+
+                        <div style="font-size:12px;line-height:1.6;color:#475569;">
+                            ' . $projectBlurb . '
+                        </div>
+
+                        </td>
+                    </tr>
+
+                    </table>
+
+                </td>
+                </tr>';
+
+            $summaryLines .= '<tr>'
+                . '<td style="padding:3px 0;color:#516173;">Project ' . $projectIndex . ' - ' . esc($projectTitle) . '</td>'
+                . '<td style="padding:3px 0;text-align:right;color:#334155;">' . esc($amount) . '</td>'
                 . '</tr>';
         }
 
-        if ($rows === '') {
-            $rows = '<tr><td colspan="4" style="border:1px solid #ddd;padding:8px;text-align:center;">No projects</td></tr>';
+        if ($projectsHtml === '') {
+            $projectsHtml = '<tr><td style="padding:18px;text-align:center;color:#6b7280;">No projects found for this quotation.</td></tr>';
+            $summaryLines = '<tr><td style="padding:3px 0;color:#64748b;">No project lines available</td><td style="padding:3px 0;text-align:right;color:#64748b;">' . esc($this->formatCurrency(0.0)) . '</td></tr>';
         }
 
-        return '<html><head><meta charset="utf-8"><title>Quotation PDF</title></head><body style="font-family:Arial,sans-serif;font-size:13px;color:#111;">'
-            . $headerHtml
-            . '<h1 style="margin-bottom:4px;">Quotation ' . esc($quoteNumber !== '' ? $quoteNumber : '#') . '</h1>'
-            . '<p style="margin:0 0 14px 0;">Status: ' . esc($status) . '</p>'
-            . ($description !== '' ? '<p style="margin:0 0 14px 0;">' . esc($description) . '</p>' : '')
-            . '<h3 style="margin:18px 0 6px 0;">Customer</h3>'
-            . '<p style="margin:0;">Name: ' . esc($customerName) . '</p>'
-            . '<p style="margin:0;">Email: ' . esc($customerEmail) . '</p>'
-            . '<p style="margin:0;">Phone: ' . esc($customerPhone) . '</p>'
-            . '<p style="margin:0 0 14px 0;">Company: ' . esc($customerCompany) . '</p>'
-            . '<h3 style="margin:18px 0 6px 0;">Projects</h3>'
-            . '<table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">'
-            . '<thead><tr>'
-            . '<th style="border:1px solid #ddd;padding:8px;background:#f3f4f6;text-align:left;">Title</th>'
-            . '<th style="border:1px solid #ddd;padding:8px;background:#f3f4f6;text-align:left;">Category</th>'
-            . '<th style="border:1px solid #ddd;padding:8px;background:#f3f4f6;text-align:left;">Services</th>'
-            . '<th style="border:1px solid #ddd;padding:8px;background:#f3f4f6;text-align:right;">Estimated Amount</th>'
-            . '</tr></thead><tbody>'
-            . $rows
-            . '</tbody></table>'
-            . '</body></html>';
+        $discountLabel = 'Discount';
+        if (($totals['discount_type'] ?? '') === 'percentage') {
+            $discountLabel = 'Discount (' . $this->toFloat($totals['discount_value'] ?? 0) . '%)';
+        }
+
+        $actionsHtml = '';
+        if ($showActions && $acceptUrl !== '' && $rejectUrl !== '') {
+            $actionsHtml .= '<div style="margin:0 0 20px 0;padding:16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;">';
+            $actionsHtml .= '<div style="font-size:14px;color:#1e3a8a;font-weight:600;margin-bottom:10px;">Please review and respond using the buttons below.</div>';
+            $actionsHtml .= '<a href="' . esc($acceptUrl) . '" style="display:inline-block;padding:10px 18px;background:#047857;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;margin-right:8px;">Accept Quotation</a>';
+            $actionsHtml .= '<a href="' . esc($rejectUrl) . '" style="display:inline-block;padding:10px 18px;background:#b91c1c;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">Reject Quotation</a>';
+            $actionsHtml .= '</div>';
+        }
+
+        $contractHtml = '';
+        if ($contractUrl !== '') {
+            $contractTitle = $contractName !== '' ? $contractName : 'Contract';
+            $contractMeta = $contractTemplateName !== '' ? 'Template: ' . $contractTemplateName : 'Open contract preview and sign digitally.';
+
+            $contractHtml .= '<div style="margin:20px 0 0 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">';
+            $contractHtml .= '<div style="font-size:16px;font-weight:700;color:#111827;margin:0 0 6px 0;">' . esc($contractTitle) . '</div>';
+            $contractHtml .= '<div style="font-size:13px;color:#4b5563;margin:0 0 10px 0;">' . esc($contractMeta) . '</div>';
+            $contractHtml .= '<a href="' . esc($contractUrl) . '" style="display:inline-block;padding:9px 14px;background:#1f2937;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Open Contract Link</a>';
+            $contractHtml .= '</div>';
+        }
+
+        $expiryHtml = $expiryLabel !== ''
+            ? '<div style="font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin:0 0 14px 0;">Public response link expires on ' . esc($expiryLabel) . '.</div>'
+            : '';
+
+        $responseReason = $this->normalizeNullableText($quotation['response_reason'] ?? null);
+        $responseAt = trim((string) ($quotation['response_at'] ?? ''));
+        $responseDate = $responseAt !== '' ? date('M j, Y', strtotime($responseAt) ?: time()) : '';
+        $responseHtml = '';
+        if ($responseReason !== null || $status === self::STATUS_ACCEPTED || $status === self::STATUS_REJECTED) {
+            $responseBody = $responseReason !== null ? $responseReason : 'Quotation response has been recorded.';
+            $responseHtml = '<div style="padding:18px 16px;border:1px solid #a7f3d0;background:#ecfdf5;border-radius:14px;">'
+                . '<div style="font-size:34px;color:#ffffff;display:none;">.</div>'
+                . '<div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:6px;">' . esc($customerName) . '</div>'
+                . '<div style="font-size:14px;line-height:1.5;color:#516173;">' . esc($responseBody) . '</div>'
+                . ($responseDate !== '' ? '<div style="font-size:12px;color:#94a3b8;margin-top:10px;">' . esc($responseDate) . '</div>' : '')
+                . '</div>';
+        }
+
+      
+
+
+        return '<div style="font-family: Arial, sans-serif; background:#f4f6f9; padding:20px;">
+
+        <div style="max-width:1000px;margin:auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+
+        <!-- HEADER -->
+        <div style="background:#cb4f2e;color:#white;padding:30px;">
+        <table width="100%">
+        <tr>
+        <td>
+        <div style="font-size:22px;font-weight:700;color:white">' . esc($companyName) . '</div>
+        <div style="font-size:13px;opacity:.9;color:white">' . esc($companyTagline) . '</div>
+
+        <div style="margin-top:12px;font-size:12px;line-height:1.6;color:white;">
+        ' . esc($companyAddressLine1) . '<br>
+        ' . esc($companyAddressLine2) . '<br>
+        ' . esc($companyContact) . '
+        </div>
+        </td>
+
+        <td align="right">
+        <div style="font-size:22px;font-weight:700;color:white;">QUOTATION</div>
+        <div style="font-size:14px;margin-top:6px; color:white">' . esc($quoteTitle) . '</div>
+        <div style="margin-top:10px;font-size:12px; color:white;">
+        <strong>Date:</strong> ' . esc($quoteDateLabel) . '
+        </div>
+        </td>
+        </tr>
+        </table>
+        </div>
+
+        <!-- BODY -->
+        <div style="padding:30px;">
+
+        ' . $expiryHtml . '
+        ' . $actionsHtml . '
+
+        <!-- BILL TO -->
+        <table width="100%" style="margin-bottom:25px;">
+        <tr>
+        <td width="50%">
+        <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">BILL TO</div>
+        <div style="font-weight:700;">' . esc($customerName) . '</div>
+        <div style="font-size:13px;color:#555;">' . esc($customerCompany) . '</div>
+        <div style="font-size:13px;color:#555;">' . esc($customerEmail) . '</div>
+        <div style="font-size:13px;color:#555;">' . esc($customerPhone) . '</div>
+        </td>
+
+        <td width="50%">
+        <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">FROM</div>
+        <div style="font-weight:700;">' . esc($companyName) . '</div>
+        <div style="font-size:13px;color:#555;">' . esc($companyAddressLine1) . ', ' . esc($companyAddressLine2) . '</div>
+        <div style="font-size:13px;color:#555;">' . esc($companyWebsite) . '</div>
+        </td>
+        </tr>
+        </table>
+
+        <!-- DESCRIPTION -->
+        <div style="margin-bottom:25px;">
+        <div style="font-size:13px;color:#6b7280;margin-bottom:8px;">DESCRIPTION</div>
+        <div style="font-size:14px;line-height:1.6;">
+        ' . esc($description !== '' ? $description : 'Complete estimation package prepared for your review.') . '
+        </div>
+        </div>
+
+        <!-- PROJECTS -->
+        <div style="margin-bottom:25px;">
+        <div style="font-size:13px;color:#6b7280;margin-bottom:10px;">PROJECTS</div>
+
+        <table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse;">
+        '
+            . $projectsHtml .
+            '</table>'
+            . '</div>' . 
+            '<div style="margin-top:28px;padding-top:8px;border-top:1px solid #e5e7eb;">' . '<table width="100%" cellspacing="0" cellpadding="0">' 
+            . '<tr>' 
+            . '<td style="vertical-align:top;width:56%;padding-right:18px;">' 
+            . '<div style="font-size:18px;text-transform:uppercase;letter-spacing:0.08em;color:#516173;margin-bottom:10px;">Financial Summary</div>' 
+            . '</td>' . 
+            '<td style="vertical-align:top;width:44%;">' . 
+            '<table width="100%" cellspacing="0" cellpadding="0">' . $summaryLines . 
+            '<tr><td colspan="2" style="padding:8px 0;border-top:1px solid #d1d5db;"></td></tr>' . 
+            '<tr>
+            <td style="padding:5px 0;color:#111827;">Subtotal</td>
+            <td style="padding:5px 0;text-align:right;font-weight:700;">' . esc($this->formatCurrency($totals['subtotal'])) . '</td>
+            
+            </tr>' . '<tr><td style="padding:5px 0;color:#059669;">'
+             . esc($discountLabel) . 
+             '</td><td style="padding:5px 0;text-align:right;font-weight:700;color:#059669;">- ' 
+             . esc($this->formatCurrency($totals['discount_amount'])) . '</td></tr>' . 
+             '<tr>
+             <td colspan="2" style="padding:8px 0;border-top:1px solid #d1d5db;">
+             </td>
+             </tr>' . 
+             '<tr>
+             <td style="padding:8px 0;font-size:39px;color:#ffffff;display:none;">.
+             </td>
+             <td>
+             </td>
+             </tr>' 
+             . '<tr>
+             <td style="padding:6px 0;font-size:18px;font-weight:700;color:#111827;">Total</td>
+             <td style="padding:0;text-align:right;font-size:22px;font-weight:700;color:#111827;">' . esc($this->formatCurrency($totals['total'])) . '</td>
+             </tr>' . 
+             '</table>' . 
+             '</td>' . 
+             '</tr>' . 
+             '</table>' . 
+             '</div>' . ($notes !== '' ? '
+             <div style="margin-top:16px;padding:12px;border:1px solid #e5e7eb;background:#f9fafb;border-radius:10px;">
+             <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Additional Notes</div>
+             <div style="font-size:13px;line-height:1.5;color:#1f2937;">' . nl2br(esc($notes)) . 
+             '</div>
+             </div>' : '') . $contractHtml . ($responseHtml !== '' ? '<div style="margin-top:28px;padding-top:20px;border-top:1px solid #e5e7eb;"><div style="font-size:18px;text-transform:uppercase;letter-spacing:0.08em;color:#059669;margin-bottom:12px;">Customer Response</div>' . $responseHtml . '</div>' : '') . '</div>' . '</div>' . '</div>';
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     * @param array<int, array<string, mixed>> $projects
+     * @return array{subtotal:float, discount_amount:float, total:float, discount_type:string, discount_value:float}
+     */
+    private function calculateQuotationTotals(array $quotation, array $projects): array
+    {
+        $subtotal = 0.0;
+        foreach ($projects as $project) {
+            if (!is_array($project)) {
+                continue;
+            }
+
+            $subtotal += $this->toFloat($project['estimated_amount'] ?? 0);
+        }
+
+        $discountType = (string) ($quotation['discount_type'] ?? '');
+        $discountValue = $this->toFloat($quotation['discount_value'] ?? 0);
+        $discountAmount = 0.0;
+
+        if ($discountType === 'percentage') {
+            $discountAmount = $subtotal * ($discountValue / 100);
+        } elseif ($discountType === 'fixed_amount') {
+            $discountAmount = $discountValue;
+        }
+
+        $discountAmount = min(max(0.0, $discountAmount), $subtotal);
+        $total = max(0.0, $subtotal - $discountAmount);
+
+        return [
+            'subtotal' => round($subtotal, 2),
+            'discount_amount' => round($discountAmount, 2),
+            'total' => round($total, 2),
+            'discount_type' => $discountType,
+            'discount_value' => $discountValue,
+        ];
+    }
+
+    private function formatCurrency(float $amount): string
+    {
+        return '$' . number_format($amount, 2, '.', ',');
+    }
+
+    private function toFloat(mixed $value): float
+    {
+        if (is_int($value) || is_float($value)) {
+            return (float) $value;
+        }
+
+        if (!is_string($value)) {
+            return 0.0;
+        }
+
+        return (float) preg_replace('/[^0-9.\-]/', '', $value);
     }
 
     private function getLogoDataUri(): ?string
@@ -1419,7 +1810,7 @@ class QuotationController extends BaseApiController
         $quotationModel = new QuotationModel();
         $result = $quotationModel->paginateQuotations($customerId, $search, $perPage, $offset, $status);
         $result['items'] = $this->attachQuotationContractIds($result['items']);
-        $result['items'] = array_map(fn (array $quotation): array => $this->formatQuotationForResponse($quotation), $result['items']);
+        $result['items'] = array_map(fn(array $quotation): array => $this->formatQuotationForResponse($quotation), $result['items']);
 
         return $result;
     }
@@ -1434,8 +1825,8 @@ class QuotationController extends BaseApiController
             return [];
         }
 
-        $quotationIds = array_map(static fn (array $quotation): int => (int) ($quotation['id'] ?? 0), $quotations);
-        $quotationIds = array_values(array_unique(array_filter($quotationIds, static fn (int $id): bool => $id > 0)));
+        $quotationIds = array_map(static fn(array $quotation): int => (int) ($quotation['id'] ?? 0), $quotations);
+        $quotationIds = array_values(array_unique(array_filter($quotationIds, static fn(int $id): bool => $id > 0)));
         if ($quotationIds === []) {
             return $quotations;
         }
@@ -1554,6 +1945,21 @@ class QuotationController extends BaseApiController
     private function buildPublicQuotationPreviewUrl(string $token): string
     {
         return $this->buildFrontendUrl('/quotation-preview', [
+            'token' => $token,
+        ]);
+    }
+
+    private function buildPublicQuotationActionUrl(string $token, string $action): string
+    {
+        return $this->buildFrontendUrl('/quotation-preview', [
+            'token' => $token,
+            'action' => strtolower(trim($action)),
+        ]);
+    }
+
+    private function buildPublicContractPreviewUrl(string $token): string
+    {
+        return $this->buildFrontendUrl('/contract-preview', [
             'token' => $token,
         ]);
     }
@@ -1702,9 +2108,9 @@ class QuotationController extends BaseApiController
     private function extractTemplateClauseIds(array $contract): array
     {
         $clauses = is_array($contract['clauses'] ?? null) ? $contract['clauses'] : [];
-        $ids = array_map(static fn (array $clause): int => (int) ($clause['id'] ?? 0), $clauses);
+        $ids = array_map(static fn(array $clause): int => (int) ($clause['id'] ?? 0), $clauses);
 
-        return array_values(array_filter($ids, static fn (int $clauseId): bool => $clauseId > 0));
+        return array_values(array_filter($ids, static fn(int $clauseId): bool => $clauseId > 0));
     }
 
     private function normalizeDateTimeString(mixed $value): ?string

@@ -1,4 +1,4 @@
-{
+﻿{
   "info": {
     "_postman_id": "5a5f9f2d-29d2-4fd0-bd58-2f8f8ef09c80",
     "name": "REMS Portal API",
@@ -22,20 +22,7 @@
         {
           "name": "Register",
           "request": {
-            "auth": {
-              "type": "noauth"
-            },
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"{{register_name}}\",\n  \"email\": \"{{register_email}}\",\n  \"password\": \"{{register_password}}\",\n  \"phone\": \"{{register_phone}}\",\n  \"company\": \"{{register_company}}\"\n}"
-            },
             "url": {
               "raw": "{{baseUrl}}/api/auth/register",
               "host": [
@@ -46,11 +33,51 @@
                 "auth",
                 "register"
               ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{register_name}}\",\n  \"email\": \"{{register_email}}\",\n  \"password\": \"{{register_password}}\",\n  \"phone\": \"{{register_phone}}\",\n  \"company\": \"{{register_company}}\"\n}"
             }
           }
         },
         {
           "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{login_email}}\",\n  \"password\": \"{{login_password}}\"\n}"
+            }
+          },
           "event": [
             {
               "listen": "test",
@@ -64,71 +91,31 @@
                   "",
                   "const directAccess = json.access_token || json.accessToken || null;",
                   "const directRefresh = json.refresh_token || json.refreshToken || null;",
-                  "const dataAccess = json.data && (json.data.access_token || json.data.accessToken || (json.data.tokens && (json.data.tokens.access_token || json.data.tokens.accessToken)));",
-                  "const dataRefresh = json.data && (json.data.refresh_token || json.data.refreshToken || (json.data.tokens && (json.data.tokens.refresh_token || json.data.tokens.refreshToken)));",
+                  "const dataAccess = json.data \u0026\u0026 (json.data.access_token || json.data.accessToken || (json.data.tokens \u0026\u0026 (json.data.tokens.access_token || json.data.tokens.accessToken)));",
+                  "const dataRefresh = json.data \u0026\u0026 (json.data.refresh_token || json.data.refreshToken || (json.data.tokens \u0026\u0026 (json.data.tokens.refresh_token || json.data.tokens.refreshToken)));",
                   "",
-                  "const accessToken = directAccess || dataAccess || '';",
-                  "const refreshToken = directRefresh || dataRefresh || '';",
+                  "const accessToken = directAccess || dataAccess || \u0027\u0027;",
+                  "const refreshToken = directRefresh || dataRefresh || \u0027\u0027;",
                   "",
                   "if (accessToken) {",
-                  "  pm.collectionVariables.set('access_token', accessToken);",
+                  "  pm.collectionVariables.set(\u0027access_token\u0027, accessToken);",
                   "}",
                   "if (refreshToken) {",
-                  "  pm.collectionVariables.set('refresh_token', refreshToken);",
+                  "  pm.collectionVariables.set(\u0027refresh_token\u0027, refreshToken);",
                   "}",
                   "",
-                  "pm.test('Login returned access token', function () {",
-                  "  pm.expect(accessToken).to.not.eql('');",
+                  "pm.test(\u0027Login returned access token\u0027, function () {",
+                  "  pm.expect(accessToken).to.not.eql(\u0027\u0027);",
                   "});"
                 ]
               }
             }
-          ],
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"{{login_email}}\",\n  \"password\": \"{{login_password}}\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/login",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "login"
-              ]
-            }
-          }
+          ]
         },
         {
           "name": "Forgot Password",
           "request": {
-            "auth": {
-              "type": "noauth"
-            },
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"{{login_email}}\"\n}"
-            },
             "url": {
               "raw": "{{baseUrl}}/api/auth/forgot-password",
               "host": [
@@ -139,26 +126,26 @@
                 "auth",
                 "forgot-password"
               ]
-            }
-          }
-        },
-        {
-          "name": "Reset Password",
-          "request": {
-            "auth": {
-              "type": "noauth"
             },
-            "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
               }
             ],
+            "auth": {
+              "type": "noauth"
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"token\": \"{{reset_token}}\",\n  \"password\": \"{{new_password}}\"\n}"
-            },
+              "raw": "{\n  \"email\": \"{{login_email}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/auth/reset-password",
               "host": [
@@ -169,6 +156,19 @@
                 "auth",
                 "reset-password"
               ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{reset_token}}\",\n  \"password\": \"{{new_password}}\"\n}"
             }
           }
         },
@@ -210,16 +210,6 @@
           "name": "Change Password",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"current_password\": \"{{login_password}}\",\n  \"password\": \"{{new_password}}\"\n}"
-            },
             "url": {
               "raw": "{{baseUrl}}/api/auth/change-password",
               "host": [
@@ -230,6 +220,16 @@
                 "auth",
                 "change-password"
               ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"current_password\": \"{{login_password}}\",\n  \"password\": \"{{new_password}}\"\n}"
             }
           }
         },
@@ -253,48 +253,12 @@
       ]
     },
     {
-      "name": "Project Intake",
+      "name": "Public Endpoints",
       "item": [
-        {
-          "name": "Submit Projects",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"client_name\": \"{{client_name}}\",\n  \"client_email\": \"{{client_email}}\",\n  \"client_phone\": \"{{client_phone}}\",\n  \"company\": \"{{client_company}}\",\n  \"projects\": [\n    {\n      \"project_title\": \"Sample Project A\",\n      \"project_description\": \"Interior scope for first floor\",\n      \"category_id\": {{category_id}},\n      \"service_ids\": [{{service_id_1}}, {{service_id_2}}],\n      \"estimated_amount\": 25000,\n      \"payment_type\": \"fixed_rate\",\n      \"discount_type\": \"percentage\",\n      \"discount_value\": 5,\n      \"discount_scope\": \"project_total\",\n      \"scope\": \"Fit-out\",\n      \"estimate_type\": \"complete\",\n      \"zip_code\": \"90210\",\n      \"deadline\": \"standard\",\n      \"deadline_date\": \"2026-05-15\"\n    }\n  ]\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/projects/submit",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "projects",
-                "submit"
-              ]
-            }
-          }
-        },
         {
           "name": "Download Secure File",
           "request": {
-            "auth": {
-              "type": "noauth"
-            },
             "method": "GET",
-            "header": [
-              {
-                "key": "X-File-Password",
-                "value": "{{file_password}}"
-              }
-            ],
             "url": {
               "raw": "{{baseUrl}}/api/projects/files/{{fileToken}}",
               "host": [
@@ -306,6 +270,162 @@
                 "files",
                 "{{fileToken}}"
               ]
+            },
+            "header": [
+              {
+                "key": "X-File-Password",
+                "value": "{{file_password}}"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Get Quotation Public Details",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/get_quotation_public_details{{public_token}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "get_quotation_public_details{{public_token}}"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Customer Responded",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/customer_responded{{public_token}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customer_responded{{public_token}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"accept\",\n  \"reason\": \"Approved by customer\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Public Quotation Contract",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations_contract",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations_contract"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Public Quotation Contract By Token",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/public_quotations_contract/{{quotation_contract_token}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "public_quotations_contract",
+                "{{quotation_contract_token}}"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Submit Contract Signature (Contract Token Query)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations_contract_signature/contract?token={{quotation_contract_token}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations_contract_signature",
+                "contract"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{recipient_name}}\",\n  \"signature\": \"Customer Signature\",\n  \"dateSigned\": \"2026-04-27 10:30:00\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Submit Contract Signature (Path Token)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations_contract_signature/{{quotation_contract_token}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations_contract_signature",
+                "{{quotation_contract_token}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"{{recipient_name}}\",\n  \"signature\": \"Customer Signature\",\n  \"dateSigned\": \"2026-04-27 10:30:00\"\n}"
             }
           }
         }
@@ -315,165 +435,175 @@
       "name": "Categories",
       "item": [
         {
-          "name": "List Categories",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/api/categories",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "categories"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Get Category",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/api/categories/{{category_id}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "categories",
-                "{{category_id}}"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Create Category (Admin)",
-          "request": {
-            "method": "POST",
-            "body": {
-              "mode": "formdata",
-              "formdata": [
-                {
-                  "key": "name",
-                  "value": "General Construction",
-                  "type": "text"
+          "name": "Public",
+          "item": [
+            {
+              "name": "List Categories",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories"
+                  ]
                 },
-                {
-                  "key": "slug",
-                  "value": "general-construction",
-                  "type": "text"
-                },
-                {
-                  "key": "description",
-                  "value": "General project category",
-                  "type": "text"
-                },
-                {
-                  "key": "image",
-                  "type": "file",
-                  "src": ""
-                },
-                {
-                  "key": "is_active",
-                  "value": "true",
-                  "type": "text"
-                },
-                {
-                  "key": "sort_order",
-                  "value": "1",
-                  "type": "text"
+                "auth": {
+                  "type": "noauth"
                 }
-              ]
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/categories",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "categories"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Update Category PUT (Admin)",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
               }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"description\": \"Updated category description\",\n  \"image\": \"https://cdn.example.com/categories/general-construction-updated.jpg\",\n  \"sort_order\": 2\n}"
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/categories/{{category_id}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "categories",
-                "{{category_id}}"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Update Category PATCH (Admin)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
+            {
+              "name": "Get Category",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories/{{category_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                }
               }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"is_active\": true\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/categories/{{category_id}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "categories",
-                "{{category_id}}"
-              ]
             }
-          }
+          ]
         },
         {
-          "name": "Delete Category (Admin)",
-          "request": {
-            "method": "DELETE",
-            "url": {
-              "raw": "{{baseUrl}}/api/categories/{{category_id}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "categories",
-                "{{category_id}}"
-              ]
+          "name": "Admin",
+          "item": [
+            {
+              "name": "Create Category",
+              "request": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories"
+                  ]
+                },
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "name",
+                      "value": "General Construction",
+                      "type": "text"
+                    },
+                    {
+                      "key": "slug",
+                      "value": "general-construction",
+                      "type": "text"
+                    },
+                    {
+                      "key": "description",
+                      "value": "General project category",
+                      "type": "text"
+                    },
+                    {
+                      "key": "is_active",
+                      "value": "true",
+                      "type": "text"
+                    },
+                    {
+                      "key": "sort_order",
+                      "value": "1",
+                      "type": "text"
+                    },
+                    {
+                      "key": "image",
+                      "src": "",
+                      "type": "file"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Update Category (POST)",
+              "request": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories/{{category_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"General Construction Updated\",\n  \"description\": \"Updated category description\",\n  \"sort_order\": 2\n}"
+                }
+              }
+            },
+            {
+              "name": "Update Category (PATCH)",
+              "request": {
+                "method": "PATCH",
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories/{{category_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"is_active\": true\n}"
+                }
+              }
+            },
+            {
+              "name": "Delete Category",
+              "request": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{baseUrl}}/api/categories/{{category_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "categories",
+                    "{{category_id}}"
+                  ]
+                }
+              }
             }
-          }
+          ]
         }
       ]
     },
@@ -481,171 +611,218 @@
       "name": "Services",
       "item": [
         {
-          "name": "List Services",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/api/services",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "services"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Get Service",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "services",
-                "{{service_id_1}}"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Get Services By Category",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/api/services/category/{{category_id}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "services",
-                "category",
-                "{{category_id}}"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Create Service (Admin)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
+          "name": "Public",
+          "item": [
+            {
+              "name": "List Services",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/services",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "services"
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                }
               }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Concrete Work\",\n  \"slug\": \"concrete-work\",\n  \"description\": \"Concrete takeoff and estimating\",\n  \"category_ids\": [{{category_id}}],\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/services",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "services"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Update Service PUT (Admin)",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
+            {
+              "name": "Get Service",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "services",
+                    "{{service_id_1}}"
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                }
               }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"description\": \"Updated service description\"\n}"
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "services",
-                "{{service_id_1}}"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Update Service PATCH (Admin)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
+            {
+              "name": "Get Services By Category",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/services/category/{{category_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "services",
+                    "category",
+                    "{{category_id}}"
+                  ]
+                },
+                "auth": {
+                  "type": "noauth"
+                }
               }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"is_active\": true\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "services",
-                "{{service_id_1}}"
-              ]
             }
-          }
+          ]
         },
         {
-          "name": "Delete Service (Admin)",
-          "request": {
-            "method": "DELETE",
-            "url": {
-              "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "services",
-                "{{service_id_1}}"
-              ]
+          "name": "Admin",
+          "item": [
+            {
+              "name": "Create Service",
+              "request": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{baseUrl}}/api/services",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "services"
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Concrete Work\",\n  \"slug\": \"concrete-work\",\n  \"description\": \"Concrete takeoff and estimating\",\n  \"category_ids\": [{{category_id}}],\n  \"is_active\": true,\n  \"sort_order\": 1\n}"
+                }
+              }
+            },
+            {
+              "name": "Update Service (POST)",
+              "request": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "services",
+                    "{{service_id_1}}"
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"description\": \"Updated service description\",\n  \"category_ids\": [{{category_id}}]\n}"
+                }
+              }
+            },
+            {
+              "name": "Update Service (PATCH)",
+              "request": {
+                "method": "PATCH",
+                "url": {
+                  "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "services",
+                    "{{service_id_1}}"
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"is_active\": true\n}"
+                }
+              }
+            },
+            {
+              "name": "Delete Service",
+              "request": {
+                "method": "DELETE",
+                "url": {
+                  "raw": "{{baseUrl}}/api/services/{{service_id_1}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "services",
+                    "{{service_id_1}}"
+                  ]
+                }
+              }
             }
-          }
+          ]
         }
       ]
     },
     {
-      "name": "Customers",
+      "name": "Projects",
       "item": [
         {
-          "name": "List Customers (Admin)",
+          "name": "Protected",
+          "item": [
+            {
+              "name": "Submit Projects",
+              "request": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{baseUrl}}/api/projects/submit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "projects",
+                    "submit"
+                  ]
+                },
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"client_name\": \"{{client_name}}\",\n  \"client_email\": \"{{client_email}}\",\n  \"client_phone\": \"{{client_phone}}\",\n  \"company\": \"{{client_company}}\",\n  \"projects\": [\n    {\n      \"project_title\": \"Sample Project A\",\n      \"project_description\": \"Interior scope for first floor\",\n      \"category_id\": {{category_id}},\n      \"service_ids\": [{{service_id_1}}, {{service_id_2}}],\n      \"estimated_amount\": 25000,\n      \"payment_type\": \"fixed_rate\",\n      \"scope\": \"Fit-out\",\n      \"estimate_type\": \"complete\",\n      \"zip_code\": \"90210\",\n      \"deadline\": \"standard\",\n      \"deadline_date\": \"2026-05-15\"\n    }\n  ]\n}"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin - Customers",
+      "item": [
+        {
+          "name": "Create Customer",
           "request": {
-            "method": "GET",
+            "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/customers",
               "host": [
@@ -655,13 +832,7 @@
                 "api",
                 "customers"
               ]
-            }
-          }
-        },
-        {
-          "name": "Create Customer (Admin)",
-          "request": {
-            "method": "POST",
+            },
             "header": [
               {
                 "key": "Content-Type",
@@ -671,7 +842,13 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"phone\": \"+14155552671\",\n  \"company\": \"Doe Construction\"\n}"
-            },
+            }
+          }
+        },
+        {
+          "name": "List Customers",
+          "request": {
+            "method": "GET",
             "url": {
               "raw": "{{baseUrl}}/api/customers",
               "host": [
@@ -685,7 +862,7 @@
           }
         },
         {
-          "name": "Get Customer (Admin)",
+          "name": "Get Customer",
           "request": {
             "method": "GET",
             "url": {
@@ -702,19 +879,9 @@
           }
         },
         {
-          "name": "Update Customer (Admin)",
+          "name": "Update Customer (POST)",
           "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"John Smith\",\n  \"phone\": \"+14155553334\",\n  \"company\": \"Smith & Sons Construction\"\n}"
-            },
+            "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/customers/{{customer_id}}",
               "host": [
@@ -725,11 +892,48 @@
                 "customers",
                 "{{customer_id}}"
               ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Smith\",\n  \"email\": \"john.smith@example.com\",\n  \"phone\": \"+14155553334\",\n  \"company\": \"Smith and Sons Construction\"\n}"
             }
           }
         },
         {
-          "name": "Delete Customer (Admin)",
+          "name": "Update Customer (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/customers/{{customer_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customer_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"company\": \"Smith and Sons Construction\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Customer",
           "request": {
             "method": "DELETE",
             "url": {
@@ -748,10 +952,420 @@
       ]
     },
     {
-      "name": "Quotations",
+      "name": "Admin - Contracts",
       "item": [
         {
-          "name": "List Quotations (Admin)",
+          "name": "List Contracts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/contracts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contracts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Contract",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/contracts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contracts"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contractName\": \"Residential Contract\",\n  \"templateName\": \"Standard Residential\",\n  \"ownerName\": \"{{owner_name}}\",\n  \"message\": \"Please review and sign.\",\n  \"clauseIds\": [{{clause_id}}]\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Contract",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/contracts/{{contract_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contracts",
+                "{{contract_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Contract (POST)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/contracts/{{contract_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contracts",
+                "{{contract_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contractName\": \"Residential Contract v2\",\n  \"ownerName\": \"{{owner_name}}\",\n  \"clauseIds\": [{{clause_id}}]\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Contract (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/contracts/{{contract_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contracts",
+                "{{contract_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Updated legal text.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Contract",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/contracts/{{contract_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "contracts",
+                "{{contract_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Clauses",
+      "item": [
+        {
+          "name": "List Clauses",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/clauses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "clauses"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Clause",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/clauses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "clauses"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Payment Terms\",\n  \"metaTitle\": \"Payment\",\n  \"description\": \"Net 30 days from invoice date.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Clause (POST)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/clauses/{{clause_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "clauses",
+                "{{clause_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Payment Terms Updated\",\n  \"description\": \"Net 15 days from invoice date.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Clause (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/clauses/{{clause_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "clauses",
+                "{{clause_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metaTitle\": \"Billing\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete Clause",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/clauses/{{clause_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "clauses",
+                "{{clause_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Quotation Contracts",
+      "item": [
+        {
+          "name": "Get By Quotation",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations_contract/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations_contract",
+                "{{quotation_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Assign To Quotation",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations_contract/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations_contract",
+                "{{quotation_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contractId\": {{contract_id}},\n  \"ownerName\": \"{{owner_name}}\",\n  \"recipientName\": \"{{recipient_name}}\",\n  \"clauseIds\": [{{clause_id}}]\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Clauses (POST)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations_contract_clauses/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations_contract_clauses",
+                "{{quotation_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clauseIds\": [{{clause_id}}]\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Clauses (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations_contract_clauses/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations_contract_clauses",
+                "{{quotation_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clauseIds\": [{{clause_id}}]\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Signatures (POST)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations_contract_signatures/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations_contract_signatures",
+                "{{quotation_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerName\": \"{{owner_name}}\",\n  \"recipientName\": \"{{recipient_name}}\",\n  \"ownerSignedAt\": \"2026-04-27 11:00:00\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Signatures (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations_contract_signatures/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations_contract_signatures",
+                "{{quotation_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ownerName\": \"{{owner_name}}\",\n  \"recipientName\": \"{{recipient_name}}\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Quotations",
+      "item": [
+        {
+          "name": "List Quotations",
           "request": {
             "method": "GET",
             "url": {
@@ -767,19 +1381,26 @@
           }
         },
         {
-          "name": "Create Quotation (Admin)",
+          "name": "List Requested Quotations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations/requested",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations",
+                "requested"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Quotation",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"customer_id\": {{customer_id}},\n  \"title\": \"Sample Quotation\",\n  \"status\": \"submitted\",\n  \"notes\": \"Initial quotation draft\"\n}"
-            },
             "url": {
               "raw": "{{baseUrl}}/api/quotations",
               "host": [
@@ -789,13 +1410,7 @@
                 "api",
                 "quotations"
               ]
-            }
-          }
-        },
-        {
-          "name": "Submit Quotation With Projects (Admin)",
-          "request": {
-            "method": "POST",
+            },
             "header": [
               {
                 "key": "Content-Type",
@@ -804,8 +1419,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"customer_id\": {{customer_id}},\n  \"projects\": [\n    {\n      \"project_title\": \"Quotation Project A\",\n      \"project_description\": \"Scope for quotation\",\n      \"category_id\": {{category_id}},\n      \"service_ids\": [{{service_id_1}}, {{service_id_2}}],\n      \"estimated_amount\": 18000,\n      \"payment_type\": \"fixed_rate\",\n      \"discount_type\": \"fixed_amount\",\n      \"discount_value\": 500,\n      \"discount_scope\": \"project_total\",\n      \"scope\": \"Interior work\",\n      \"estimate_type\": \"complete\",\n      \"zip_code\": \"10001\",\n      \"deadline\": \"standard\",\n      \"deadline_date\": \"2026-05-30\"\n    }\n  ]\n}"
-            },
+              "raw": "{\n  \"customer_id\": {{customer_id}},\n  \"projects\": [\n    {\n      \"project_title\": \"Quotation Project A\",\n      \"project_description\": \"Scope for quotation\",\n      \"category_id\": {{category_id}},\n      \"service_ids\": [{{service_id_1}}, {{service_id_2}}],\n      \"estimated_amount\": 18000,\n      \"payment_type\": \"fixed_rate\",\n      \"scope\": \"Interior work\",\n      \"estimate_type\": \"complete\",\n      \"zip_code\": \"10001\",\n      \"deadline\": \"standard\",\n      \"deadline_date\": \"2026-05-30\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Submit Quotation With Projects",
+          "request": {
+            "method": "POST",
             "url": {
               "raw": "{{baseUrl}}/api/quotations/submit",
               "host": [
@@ -816,11 +1437,21 @@
                 "quotations",
                 "submit"
               ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": {{customer_id}},\n  \"projects\": [\n    {\n      \"project_title\": \"Quotation Project A\",\n      \"project_description\": \"Scope for quotation\",\n      \"category_id\": {{category_id}},\n      \"service_ids\": [{{service_id_1}}, {{service_id_2}}],\n      \"estimated_amount\": 18000,\n      \"payment_type\": \"fixed_rate\",\n      \"scope\": \"Interior work\",\n      \"estimate_type\": \"complete\",\n      \"zip_code\": \"10001\",\n      \"deadline\": \"standard\",\n      \"deadline_date\": \"2026-05-30\"\n    }\n  ],\n  \"contract_id\": {{contract_id}}\n}"
             }
           }
         },
         {
-          "name": "Get Quotation (Admin)",
+          "name": "Get Quotation",
           "request": {
             "method": "GET",
             "url": {
@@ -837,7 +1468,112 @@
           }
         },
         {
-          "name": "Get Customer Quotations (Admin)",
+          "name": "Update Quotation (POST)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations",
+                "{{quotation_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"pending\",\n  \"notes\": \"Updated by admin\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Quotation (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotations/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotations",
+                "{{quotation_id}}"
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"accepted\",\n  \"reason\": \"Approved internally\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Send Quotation To Customer",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/send_quotation_to_customer/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "send_quotation_to_customer",
+                "{{quotation_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Square Invoice From Quotation",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/create_square_invoice_from_quotation/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "create_square_invoice_from_quotation",
+                "{{quotation_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Download Quotation PDF",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/download_quotations_pdf/{{quotation_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "download_quotations_pdf",
+                "{{quotation_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Customer Quotations",
           "request": {
             "method": "GET",
             "url": {
@@ -850,6 +1586,80 @@
                 "customers",
                 "{{customer_id}}",
                 "quotations"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Customer Requested Quotations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/customers/{{customer_id}}/quotations/requested",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "customers",
+                "{{customer_id}}",
+                "quotations",
+                "requested"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Quotation Requests",
+      "item": [
+        {
+          "name": "List Quotation Requests",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotation_requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotation_requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Quotation Request",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/quotation_requests/{{quotation_request_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "quotation_requests",
+                "{{quotation_request_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Quotation From Request",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/create_quotation_from_request/{{quotation_request_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "create_quotation_from_request",
+                "{{quotation_request_id}}"
               ]
             }
           }
@@ -949,6 +1759,11 @@
       "type": "string"
     },
     {
+      "key": "quotation_request_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
       "key": "category_id",
       "value": "1",
       "type": "string"
@@ -961,6 +1776,36 @@
     {
       "key": "service_id_2",
       "value": "2",
+      "type": "string"
+    },
+    {
+      "key": "contract_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "clause_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "owner_name",
+      "value": "Admin Owner",
+      "type": "string"
+    },
+    {
+      "key": "recipient_name",
+      "value": "Client Recipient",
+      "type": "string"
+    },
+    {
+      "key": "public_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "quotation_contract_token",
+      "value": "",
       "type": "string"
     },
     {

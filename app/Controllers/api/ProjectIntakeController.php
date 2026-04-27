@@ -2,6 +2,7 @@
 
 namespace App\Controllers\Api;
 
+use App\Libraries\JwtService;
 use App\Models\CategoryModel;
 use App\Models\CustomerModel;
 use App\Models\ProjectFileModel;
@@ -148,7 +149,7 @@ class ProjectIntakeController extends BaseApiController
             $squareResults
         );
 
-        $this->queueCustomerSubmittedNotification($clientEmail, $clientName, $requestId, $requestNumber, $createdRequestProjects, $secureFiles);
+        $this->queueCustomerSubmittedNotification($clientEmail, $clientName, $requestId);
 
         $isMultiple = count($projectItems) > 1;
         $singleProject = $createdRequestProjects[0] ?? null;
@@ -216,7 +217,8 @@ class ProjectIntakeController extends BaseApiController
         }
 
         $passwordHash = (string) ($file['access_password_hash'] ?? '');
-        if ($passwordHash !== '') {
+        $isAdmin = $this->isCurrentUserAdmin();
+        if (!$isAdmin && $passwordHash !== '') {
             $password = trim((string) ($this->request->getHeaderLine('X-File-Password') ?: $this->request->getGet('password')));
             if ($password === '' || !password_verify($password, $passwordHash)) {
                 return $this->res->unauthorized('Invalid or missing file password.');
@@ -229,6 +231,33 @@ class ProjectIntakeController extends BaseApiController
         }
 
         return $this->response->download($fullPath, null)->setFileName((string) ($file['original_name'] ?? basename($fullPath)));
+    }
+
+    private function isCurrentUserAdmin(): bool
+    {
+        $authHeader = $this->request->getHeaderLine('Authorization');
+        $token = JwtService::extractToken($authHeader);
+        if ($token === null) {
+            return false;
+        }
+
+        $payload = (new JwtService())->verifyAndDecode($token);
+        if (!is_array($payload)) {
+            return false;
+        }
+
+        $roles = $payload['roles'] ?? [];
+        if (!is_array($roles)) {
+            return false;
+        }
+
+        foreach ($roles as $role) {
+            if (strtolower(trim((string) $role)) === 'admin') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -752,16 +781,10 @@ class ProjectIntakeController extends BaseApiController
         ]);
     }
 
-    /**
-     * @param array<int, array<string, mixed>> $projects
-     */
     private function queueCustomerSubmittedNotification(
         string $email,
         string $name,
-        ?int $requestId,
-        string $requestNumber,
-        array $projects,
-        array $secureFiles
+        ?int $requestId
     ): void
     {
         $to = trim($email);
@@ -769,96 +792,17 @@ class ProjectIntakeController extends BaseApiController
             return;
         }
 
-        $projectCount = count($projects);
         $recipientName = $name === '' ? 'Customer' : $name;
-
-        // Build comprehensive project details for customer
-        $projectsHtml = '';
-        foreach ($projects as $index => $project) {
-            if (!is_array($project)) {
-                continue;
-            }
-
-            $projectId = (int) ($project['id'] ?? 0);
-            $projectTitle = (string) ($project['project_title'] ?? '');
-            $category = (string) ($project['category'] ?? 'N/A');
-            $services = $this->normalizeStringList($project['services'] ?? []);
-            $paymentType = (string) ($project['payment_type'] ?? 'fixed_rate');
-            $estimatedAmount = (string) ($project['estimated_amount'] ?? '');
-            $hourlyHours = (string) ($project['hourly_hours'] ?? '');
-            $deadline = (string) ($project['deadline'] ?? '');
-            $deliveryDate = (string) ($project['delivery_date'] ?? '');
-
-            $projectsHtml .= '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:16px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;">';
-            $projectsHtml .= '<tr><td style="padding:12px;background:#0f172a;"><strong style="color:#ffffff;">Project #' . esc((string) $projectId) . ': ' . esc($projectTitle) . '</strong></td></tr>';
-            $projectsHtml .= '<tr><td style="padding:12px;">';
-            
-            // Category and Services
-            $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Category:</strong> ' . esc($category) . '</p>';
-            $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Services:</strong> ' . esc($services === [] ? 'N/A' : implode(', ', $services)) . '</p>';
-            
-            // Billing Info
-            $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Payment Type:</strong> ' . esc($paymentType === 'hourly' ? 'Hourly' : 'Fixed Rate') . '</p>';
-            if ($estimatedAmount !== '' && $estimatedAmount !== '0.00') {
-                $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Estimated Amount:</strong> $' . esc($estimatedAmount) . '</p>';
-            }
-            if ($paymentType === 'hourly' && $hourlyHours !== '' && $hourlyHours !== '0.00') {
-                $projectsHtml .= '<p style="margin:0 0 8px 0;"><strong>Hours:</strong> ' . esc($hourlyHours) . '</p>';
-            }
-            if ($deadline !== '') {
-                $projectsHtml .= '<p style="margin:0;"><strong>Bid Deadline:</strong> ' . esc($deadline) . '</p>';
-            }
-            if ($deliveryDate !== '') {
-                $projectsHtml .= '<p style="margin:0;"><strong>Delivery Date:</strong> ' . esc($deliveryDate) . '</p>';
-            }
-            
-            $projectsHtml .= '</td></tr>';
-            $projectsHtml .= '</table>';
-        }
-
-        $fileLinksHtml = '';
-        if ($secureFiles !== []) {
-            $fileLinksHtml .= '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse;">';
-            $fileLinksHtml .= '<tr><td style="padding:12px;background:#f8fafc;border-left:3px solid #0f172a;"><strong style="color:#0f172a;">Your Uploaded Files</strong></td></tr>';
-            $fileLinksHtml .= '<tr><td style="padding:12px;">';
-            $fileLinksHtml .= '<p style="margin:0 0 12px 0;font-size:14px;color:#6b7280;">Download your files using the links and passwords provided below.</p>';
-            
-            foreach ($secureFiles as $file) {
-                $name = (string) ($file['original_name'] ?? 'File');
-                $url = (string) ($file['download_url'] ?? '');
-                $password = (string) ($file['password'] ?? '');
-                
-                if ($url === '') {
-                    continue;
-                }
-
-                $fileLinksHtml .= '<div style="margin:12px 0;padding:10px;background:#f0f4f8;border-radius:6px;border-left:2px solid #0f172a;">';
-                $fileLinksHtml .= '<p style="margin:0 0 6px 0;"><strong>' . esc($name) . '</strong></p>';
-                $fileLinksHtml .= '<p style="margin:0 0 6px 0;"><a href="' . esc($url) . '" style="color:#0f172a;text-decoration:none;word-break:break-all;">' . esc($url) . '</a></p>';
-                if ($password !== '') {
-                    $fileLinksHtml .= '<p style="margin:0;font-size:13px;"><strong>Password:</strong> <code style="background:#ffffff;padding:4px 6px;border-radius:3px;font-family:monospace;border:1px solid #e5e7eb;">' . esc($password) . '</code></p>';
-                }
-                $fileLinksHtml .= '</div>';
-            }
-
-            $fileLinksHtml .= '</td></tr>';
-            $fileLinksHtml .= '</table>';
-        }
-
-        $contentHtml = '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">Thank you for submitting your quotation request. We have received it and our team is reviewing your projects.</p>'
-            . ($requestId !== null ? '<p style="margin:14px 0 6px 0;font-size:15px;line-height:1.6;"><strong>Request ID:</strong> #' . esc((string) $requestId) . '</p>' : '')
-            . ($requestNumber !== '' ? '<p style="margin:6px 0 14px 0;font-size:15px;line-height:1.6;"><strong>Request Number:</strong> ' . esc($requestNumber) . '</p>' : '')
-            . '<p style="margin:14px 0;font-size:15px;line-height:1.6;"><strong>Total Projects Submitted:</strong> ' . esc((string) $projectCount) . '</p>'
-            . '<div style="margin:20px 0;">' . $projectsHtml . '</div>'
-            . $fileLinksHtml
-            . '<p style="margin:20px 0 0 0;font-size:14px;color:#6b7280;line-height:1.6;">You will receive updates as we process your request. If you have any questions, please don\'t hesitate to reach out to us.</p>';
+        $contentHtml = '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">Thank you for your quotation request.</p>'
+            . ($requestId !== null ? '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;"><strong>Request ID:</strong> #' . esc((string) $requestId) . '</p>' : '')
+            . '<p style="margin:0;font-size:15px;line-height:1.6;">Our team will reach out to you within 3 hours.</p>';
 
         $emailQueue = service('emailQueue');
-        $subject = 'Quotation request received' . ($requestNumber !== '' ? ' - ' . $requestNumber : ($requestId !== null ? ' #' . $requestId : ''));
+        $subject = 'Thank you for your request' . ($requestId !== null ? ' #' . $requestId : '');
         $body = $emailQueue->renderTemplate([
             'subject' => $subject,
             'recipientName' => $recipientName,
-            'headline' => 'We received your request',
+            'headline' => 'Thank You',
             'contentHtml' => $contentHtml,
         
         ]);

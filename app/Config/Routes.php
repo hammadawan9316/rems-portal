@@ -99,7 +99,7 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
     });
 
     // Project intake routes
-    $routes->group('projects', ['filter' => 'jwtAuth'], function ($routes) {
+    $routes->group('projects', function ($routes) {
         $routes->post('submit', 'ProjectIntakeController::submit');
     });
 });

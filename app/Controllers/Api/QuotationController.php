@@ -2,6 +2,7 @@
 
 namespace App\Controllers\Api;
 
+use App\Models\BusinessProfileModel;
 use App\Models\CategoryModel;
 use App\Models\ContractModel;
 use App\Models\CustomerModel;
@@ -152,10 +153,23 @@ class QuotationController extends BaseApiController
         }
 
         $quoteNumber = $quotationModel->generateQuoteNumber();
+        $businessSnapshot = $this->resolveBusinessSnapshotPayload($data);
+        if (isset($businessSnapshot['error'])) {
+            return $this->res->badRequest((string) $businessSnapshot['error'], [
+                'business_profile_id' => (string) $businessSnapshot['error'],
+            ]);
+        }
 
         $quotationPayload = [
             'customer_id' => $customerId,
             'source_request_id' => $requestId > 0 ? $requestId : null,
+            'business_profile_id' => $businessSnapshot['business_profile_id'] ?? null,
+            'business_name' => $businessSnapshot['business_name'] ?? null,
+            'business_admin_name' => $businessSnapshot['business_admin_name'] ?? null,
+            'business_email' => $businessSnapshot['business_email'] ?? null,
+            'business_phone' => $businessSnapshot['business_phone'] ?? null,
+            'business_address' => $businessSnapshot['business_address'] ?? null,
+            'business_website_url' => $businessSnapshot['business_website_url'] ?? null,
             'quote_number' => $quoteNumber,
             'description' => $this->normalizeNullableText($data['description'] ?? ($data['title'] ?? ($request['description'] ?? null))),
             'status' => self::STATUS_DRAFT,
@@ -389,6 +403,7 @@ class QuotationController extends BaseApiController
             'acceptUrl' => $acceptUrl,
             'rejectUrl' => $rejectUrl,
             'contractUrl' => $contractPreviewUrl,
+            'publicToken' => $plainToken,
             'contractName' => $contractName,
             'contractTemplateName' => $contractTemplateName,
             'expiryLabel' => $expiryHuman,
@@ -572,6 +587,23 @@ class QuotationController extends BaseApiController
 
         if (array_key_exists('description', $data) || array_key_exists('title', $data)) {
             $quotationPayload['description'] = $this->normalizeNullableText($data['description'] ?? ($data['title'] ?? null));
+        }
+
+        if (array_key_exists('business_profile_id', $data) || array_key_exists('businessProfileId', $data)) {
+            $businessSnapshot = $this->resolveBusinessSnapshotPayload($data, true);
+            if (isset($businessSnapshot['error'])) {
+                return $this->res->badRequest((string) $businessSnapshot['error'], [
+                    'business_profile_id' => (string) $businessSnapshot['error'],
+                ]);
+            }
+
+            $quotationPayload['business_profile_id'] = $businessSnapshot['business_profile_id'] ?? null;
+            $quotationPayload['business_name'] = $businessSnapshot['business_name'] ?? null;
+            $quotationPayload['business_admin_name'] = $businessSnapshot['business_admin_name'] ?? null;
+            $quotationPayload['business_email'] = $businessSnapshot['business_email'] ?? null;
+            $quotationPayload['business_phone'] = $businessSnapshot['business_phone'] ?? null;
+            $quotationPayload['business_address'] = $businessSnapshot['business_address'] ?? null;
+            $quotationPayload['business_website_url'] = $businessSnapshot['business_website_url'] ?? null;
         }
 
         $responseReasonProvided = array_key_exists('response_reason', $data) || array_key_exists('reason', $data);
@@ -1343,7 +1375,7 @@ class QuotationController extends BaseApiController
             }
         }
 
-        return '<html><head><meta charset="utf-8"><title>Quotation PDF</title></head><body style="margin:0;padding:0;background:#f8fafc;">'
+        return '<html><head><meta charset="utf-8"><title>Quotation PDF</title><style>body, table, td, div, span, p, a, strong { font-family: Arial, Helvetica, sans-serif !important; }</style></head><body style="margin:0;padding:0;background:#ffffff;">'
             . $this->buildQuotationDocumentHtml($quotation, $projects, [
                 'showActions' => false,
                 'contractName' => $contractName,
@@ -1360,9 +1392,7 @@ class QuotationController extends BaseApiController
     private function buildQuotationDocumentHtml(array $quotation, array $projects, array $options = []): string
     {
         $quoteNumber = trim((string) ($quotation['quote_number'] ?? ''));
-        $status = strtolower(trim((string) ($quotation['status'] ?? 'pending')));
         $description = trim((string) ($quotation['description'] ?? ''));
-        $notes = trim((string) ($quotation['notes'] ?? ''));
         $createdAt = trim((string) ($quotation['created_at'] ?? ''));
         $expiryLabel = trim((string) ($options['expiryLabel'] ?? ''));
         $quoteTitle = $quoteNumber !== '' ? $quoteNumber : ('#' . (int) ($quotation['id'] ?? 0));
@@ -1372,8 +1402,13 @@ class QuotationController extends BaseApiController
         $acceptUrl = trim((string) ($options['acceptUrl'] ?? ''));
         $rejectUrl = trim((string) ($options['rejectUrl'] ?? ''));
         $contractUrl = trim((string) ($options['contractUrl'] ?? ''));
+        $publicToken = trim((string) ($options['publicToken'] ?? ''));
         $contractName = trim((string) ($options['contractName'] ?? ''));
         $contractTemplateName = trim((string) ($options['contractTemplateName'] ?? ''));
+
+        if ($contractUrl === '' && $publicToken !== '') {
+            $contractUrl = $this->buildPublicContractPreviewUrl($publicToken);
+        }
 
         $customer = is_array($quotation['customer'] ?? null) ? $quotation['customer'] : [];
         $customerName = trim((string) ($customer['name'] ?? 'N/A'));
@@ -1384,21 +1419,44 @@ class QuotationController extends BaseApiController
         $logoDataUri = $this->getLogoDataUri();
         $totals = $this->calculateQuotationTotals($quotation, $projects);
 
-        $companyName = 'Remote Estimation LLC';
-        $companyTagline = 'Precision Takeoffs - Complete Cost Estimates';
-        $companyAddressLine1 = '4820 Commerce Drive, Suite 310';
-        $companyAddressLine2 = 'Dallas, TX 75201';
-        $companyContact = '(214) 555-0183 - info@apexestimating.com';
-        $companyEin = 'EIN: 47-2318540';
-        $companyWebsite = 'www.apexestimating.com';
+        $business = is_array($quotation['business'] ?? null) ? $quotation['business'] : [];
+        $companyName = trim((string) ($business['company_name'] ?? ($quotation['business_name'] ?? 'Remote Estimation LLC')));
+        if ($companyName === '') {
+            $companyName = 'Remote Estimation LLC';
+        }
 
-        $statusColors = [
-            self::STATUS_ACCEPTED => ['#14532d', '#dcfce7'],
-            self::STATUS_REJECTED => ['#7f1d1d', '#fee2e2'],
-            self::STATUS_PENDING => ['#7c2d12', '#ffedd5'],
-            self::STATUS_DRAFT => ['#1e3a8a', '#dbeafe'],
-        ];
-        [$statusTextColor, $statusBgColor] = $statusColors[$status] ?? ['#374151', '#e5e7eb'];
+        $adminName = trim((string) ($business['admin_name'] ?? ($quotation['business_admin_name'] ?? '')));
+        $businessEmail = trim((string) ($business['email'] ?? ($quotation['business_email'] ?? 'info@apexestimating.com')));
+        $businessPhone = trim((string) ($business['phone'] ?? ($quotation['business_phone'] ?? '(214) 555-0183')));
+        $businessAddress = trim((string) ($business['address'] ?? ($quotation['business_address'] ?? '4820 Commerce Drive, Suite 310, Dallas, TX 75201')));
+        $businessWebsite = trim((string) ($business['website_url'] ?? ($quotation['business_website_url'] ?? 'www.apexestimating.com')));
+
+        $companyTagline = 'Precision Takeoffs - Complete Cost Estimates';
+        $companyAddressLine1 = $businessAddress;
+        $companyAddressLine2 = '';
+        $companyContactParts = [];
+        if ($businessPhone !== '') {
+            $companyContactParts[] = $businessPhone;
+        }
+        if ($businessEmail !== '') {
+            $companyContactParts[] = $businessEmail;
+        }
+        $companyContact = $companyContactParts !== [] ? implode(' - ', $companyContactParts) : '';
+        $companyWebsite = $businessWebsite;
+
+        $companyAddressBlock = esc($companyAddressLine1);
+        if ($companyAddressLine2 !== '') {
+            $companyAddressBlock .= '<br>' . esc($companyAddressLine2);
+        }
+
+        $companyAddressInline = esc($companyAddressLine1);
+        if ($companyAddressLine2 !== '') {
+            $companyAddressInline .= ', ' . esc($companyAddressLine2);
+        }
+
+        $companyAdminHtml = $adminName !== ''
+            ? '<div style="font-size:13px;line-height:1.6;color:#475569;">Admin: ' . esc($adminName) . '</div>'
+            : '';
 
         $projectsHtml = '';
         $summaryLines = '';
@@ -1436,11 +1494,12 @@ class QuotationController extends BaseApiController
                     continue;
                 }
 
-                $serviceBadges .= '<span style="display:inline-block;padding:4px 9px;margin:10px 6px 6px 0;border-radius:8px;border:1px solid #f2c6b9;background:#fff4ef;color:#cc5b37;font-size:14px;font-weight:600;">' . esc($serviceText) . '</span>';
+                // Add a trailing non-breaking space so badge separation survives strict email/PDF renderers.
+                $serviceBadges .= '<span style="display:inline-block;padding:5px 10px;margin:8px 8px 8px 8px !important;border-radius:8px;border:1px solid #f2c6b9;background:#fff4ef;color:#cc5b37;font-size:12px;line-height:1.2;font-weight:600;white-space:nowrap;">' . esc($serviceText) . '</span>&nbsp;';
             }
 
             if ($serviceBadges === '') {
-                $serviceBadges = '<span style="display:inline-block;padding:4px 9px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;color:#6b7280;font-size:14px;">No tagged services</span>';
+                $serviceBadges = '<span style="display:inline-block;padding:5px 10px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;color:#6b7280;font-size:12px;line-height:1.2;">No tagged services</span>';
             }
 
             $projectMetaLine = esc($estimateType) . '  -  #' . esc((string) ((int) ($project['id'] ?? $projectIndex))) . '  -  ' . esc($projectDateLabel);
@@ -1449,10 +1508,10 @@ class QuotationController extends BaseApiController
                 : 'Scope details are included in this project estimate package.';
 
             $projectsHtml .= '
-                <tr>
+                <tr style="border:1px solid #707e92 !important;border-radius:8px !important;">
                 <td style="padding:0 0 16px 0;">
 
-                    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:8px;background:#ffffff;">
+                    <table width="100%" cellspacing="0">
                     
                     <!-- TOP ROW -->
                     <tr>
@@ -1475,15 +1534,15 @@ class QuotationController extends BaseApiController
                                 ' . esc($projectTitle) . '
                                 </div>
 
-                                <div style="font-size:14px;color:#64748b;margin:4px 0 8px 0; padding-bottom:10px;">
+                                <div style="font-size:12px;color:#64748b;line-height:1.4;margin:6px 0 10px 0 !important; padding-bottom:2px;">
                                 ' . $projectMetaLine . '
                                 </div>
 
-                                <div style="margin-bottom:8px; display:flex; flex-wrap:wrap; gap:6px;">
+                                <div style="margin:0 0 10px 0;line-height:1;">
                                 ' . $serviceBadges . '
                                 </div>
 
-                                <div style="font-size:12px;color:#6b7280;">
+                                <div style="font-size:12px;color:#6b7280; margin-top:6px !important;">
                                 Category: ' . esc($categoryName) . '
                                 </div>
 
@@ -1492,11 +1551,11 @@ class QuotationController extends BaseApiController
                             <!-- PRICE -->
                             <td width="140" align="right" valign="top">
 
-                                <div style="font-size:16px;font-weight:700;color:#111827;">
+                                <div style="font-size:18px;font-weight:700;line-height:1.2;color:#111827;">
                                 ' . esc($amount) . '
                                 </div>
 
-                                <div style="font-size:12px;color:#6b7280;margin-top:6px;">
+                                <div style="font-size:12px;line-height:1.4;color:#6b7280;margin-top:6px;">
                                 ' . esc($pricingMeta) . '
                                 </div>
 
@@ -1510,9 +1569,9 @@ class QuotationController extends BaseApiController
 
                     <!-- DESCRIPTION ROW -->
                     <tr>
-                        <td style="padding:10px 16px 14px 16px;border-top:1px solid #f1f5f9;">
+                        <td style="padding:12px 18px 16px 18px;border-top:1px solid #f1f5f9;">
 
-                        <div style="font-size:12px;line-height:1.6;color:#475569;">
+                        <div style="font-size:12px;line-height:1.7;color:#475569;">
                             ' . $projectBlurb . '
                         </div>
 
@@ -1525,14 +1584,14 @@ class QuotationController extends BaseApiController
                 </tr>';
 
             $summaryLines .= '<tr>'
-                . '<td style="padding:3px 0;color:#516173;">Project ' . $projectIndex . ' - ' . esc($projectTitle) . '</td>'
-                . '<td style="padding:3px 0;text-align:right;color:#334155;">' . esc($amount) . '</td>'
+                . '<td style="padding:4px 0;color:#516173;font-size:13px;line-height:1.4;">Project ' . $projectIndex . ' - ' . esc($projectTitle) . '</td>'
+                . '<td style="padding:4px 0;text-align:right;color:#334155;font-size:13px;line-height:1.4;">' . esc($amount) . '</td>'
                 . '</tr>';
         }
 
         if ($projectsHtml === '') {
-            $projectsHtml = '<tr><td style="padding:18px;text-align:center;color:#6b7280;">No projects found for this quotation.</td></tr>';
-            $summaryLines = '<tr><td style="padding:3px 0;color:#64748b;">No project lines available</td><td style="padding:3px 0;text-align:right;color:#64748b;">' . esc($this->formatCurrency(0.0)) . '</td></tr>';
+            $projectsHtml = '<tr><td style="padding:20px;text-align:center;font-size:13px;line-height:1.5;color:#6b7280;">No projects found for this quotation.</td></tr>';
+            $summaryLines = '<tr><td style="padding:4px 0;color:#64748b;font-size:13px;line-height:1.4;">No project lines available</td><td style="padding:4px 0;text-align:right;color:#64748b;font-size:13px;line-height:1.4;">' . esc($this->formatCurrency(0.0)) . '</td></tr>';
         }
 
         $discountLabel = 'Discount';
@@ -1542,7 +1601,7 @@ class QuotationController extends BaseApiController
 
         $actionsHtml = '';
         if ($showActions && $acceptUrl !== '' && $rejectUrl !== '') {
-            $actionsHtml .= '<div style="margin:0 0 20px 0;padding:16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;">';
+            $actionsHtml .= '<div style="margin:0 0 24px 0;padding:16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;">';
             $actionsHtml .= '<div style="font-size:14px;color:#1e3a8a;font-weight:600;margin-bottom:10px;">Please review and respond using the buttons below.</div>';
             $actionsHtml .= '<a href="' . esc($acceptUrl) . '" style="display:inline-block;padding:10px 18px;background:#047857;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;margin-right:8px;">Accept Quotation</a>';
             $actionsHtml .= '<a href="' . esc($rejectUrl) . '" style="display:inline-block;padding:10px 18px;background:#b91c1c;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">Reject Quotation</a>';
@@ -1550,14 +1609,16 @@ class QuotationController extends BaseApiController
         }
 
         $contractHtml = '';
-        if ($contractUrl !== '') {
+        if ($contractUrl !== '' || $contractName !== '' || $contractTemplateName !== '') {
             $contractTitle = $contractName !== '' ? $contractName : 'Contract';
             $contractMeta = $contractTemplateName !== '' ? 'Template: ' . $contractTemplateName : 'Open contract preview and sign digitally.';
 
-            $contractHtml .= '<div style="margin:20px 0 0 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">';
+            $contractHtml .= '<div style="margin:28px 0 0 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">';
             $contractHtml .= '<div style="font-size:16px;font-weight:700;color:#111827;margin:0 0 6px 0;">' . esc($contractTitle) . '</div>';
             $contractHtml .= '<div style="font-size:13px;color:#4b5563;margin:0 0 10px 0;">' . esc($contractMeta) . '</div>';
-            $contractHtml .= '<a href="' . esc($contractUrl) . '" style="display:inline-block;padding:9px 14px;background:#1f2937;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Open Contract Link</a>';
+            if ($contractUrl !== '') {
+                $contractHtml .= '<a href="' . esc($contractUrl) . '" style="display:inline-block;padding:9px 14px;background:#1f2937;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Open Contract Link</a>';
+            }
             $contractHtml .= '</div>';
         }
 
@@ -1565,46 +1626,36 @@ class QuotationController extends BaseApiController
             ? '<div style="font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin:0 0 14px 0;">Public response link expires on ' . esc($expiryLabel) . '.</div>'
             : '';
 
-        $responseReason = $this->normalizeNullableText($quotation['response_reason'] ?? null);
-        $responseAt = trim((string) ($quotation['response_at'] ?? ''));
-        $responseDate = $responseAt !== '' ? date('M j, Y', strtotime($responseAt) ?: time()) : '';
-        $responseHtml = '';
-        if ($responseReason !== null || $status === self::STATUS_ACCEPTED || $status === self::STATUS_REJECTED) {
-            $responseBody = $responseReason !== null ? $responseReason : 'Quotation response has been recorded.';
-            $responseHtml = '<div style="padding:18px 16px;border:1px solid #a7f3d0;background:#ecfdf5;border-radius:14px;">'
-                . '<div style="font-size:34px;color:#ffffff;display:none;">.</div>'
-                . '<div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:6px;">' . esc($customerName) . '</div>'
-                . '<div style="font-size:14px;line-height:1.5;color:#516173;">' . esc($responseBody) . '</div>'
-                . ($responseDate !== '' ? '<div style="font-size:12px;color:#94a3b8;margin-top:10px;">' . esc($responseDate) . '</div>' : '')
-                . '</div>';
+        $headerLogoHtml = '';
+        if ($logoDataUri !== null && $logoDataUri !== '') {
+            $headerLogoHtml = '<div style="margin:16px;line-height:0;" class="logo"><img src="' . esc($logoDataUri) . '" alt="' . esc($companyName) . '" style="display:block;max-width:190px;width:190px;height:auto;"></div>';
         }
 
-      
+        return '<style type="text/css">.quotation-doc, .quotation-doc * { font-family: Arial, Helvetica, sans-serif !important; } .quotation-doc table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; } ,logo{margin-bottom:16px !important;}</style>
+        
+        <div class="quotation-doc" style="font-family: Arial, Helvetica, sans-serif; background:#ffffff; padding:0; margin:0;">
 
-
-        return '<div style="font-family: Arial, sans-serif; background:#f4f6f9; padding:20px;">
-
-        <div style="max-width:1000px;margin:auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+        <div style="max-width:1000px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
 
         <!-- HEADER -->
-        <div style="background:#cb4f2e;color:#white;padding:30px;">
-        <table width="100%">
+        <div style="background:#c2022c;padding:22px 24px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
         <tr>
-        <td>
-        <div style="font-size:22px;font-weight:700;color:white">' . esc($companyName) . '</div>
-        <div style="font-size:13px;opacity:.9;color:white">' . esc($companyTagline) . '</div>
+        <td valign="top" style="padding:0;">
+        ' . $headerLogoHtml . '
 
-        <div style="margin-top:12px;font-size:12px;line-height:1.6;color:white;">
-        ' . esc($companyAddressLine1) . '<br>
-        ' . esc($companyAddressLine2) . '<br>
+        <div style="font-size:13px;line-height:1.35;opacity:.95;color:#ffffff;margin-top:16px !important;">' . esc($companyTagline) . '</div>
+
+        <div style="margin-top:12px;font-size:12px;line-height:1.45;color:#ffffff;">
+        ' . $companyAddressBlock . '<br>
         ' . esc($companyContact) . '
         </div>
         </td>
 
-        <td align="right">
-        <div style="font-size:22px;font-weight:700;color:white;">QUOTATION</div>
-        <div style="font-size:14px;margin-top:6px; color:white">' . esc($quoteTitle) . '</div>
-        <div style="margin-top:10px;font-size:12px; color:white;">
+        <td align="right" valign="top" style="padding:0 0 0 14px;">
+        <div style="font-size:20px;line-height:1.1;font-weight:700;color:#ffffff;">QUOTATION</div>
+        <div style="font-size:15px;line-height:1.4;margin-top:6px;color:#ffffff;">' . esc($quoteTitle) . '</div>
+        <div style="margin-top:10px;font-size:12px;line-height:1.4;color:#ffffff;">
         <strong>Date:</strong> ' . esc($quoteDateLabel) . '
         </div>
         </td>
@@ -1613,63 +1664,64 @@ class QuotationController extends BaseApiController
         </div>
 
         <!-- BODY -->
-        <div style="padding:30px;">
+        <div style="padding:22px 24px;">
 
         ' . $expiryHtml . '
         ' . $actionsHtml . '
 
         <!-- BILL TO -->
-        <table width="100%" style="margin-bottom:25px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;border-collapse:collapse;">
         <tr>
-        <td width="50%">
-        <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">BILL TO</div>
-        <div style="font-weight:700;">' . esc($customerName) . '</div>
-        <div style="font-size:13px;color:#555;">' . esc($customerCompany) . '</div>
-        <div style="font-size:13px;color:#555;">' . esc($customerEmail) . '</div>
-        <div style="font-size:13px;color:#555;">' . esc($customerPhone) . '</div>
+        <td width="50%" valign="top" style="padding-right:12px;">
+        <div style="font-size:12px;letter-spacing:0.05em;color:#6b7280;margin-bottom:8px;">BILL TO</div>
+        <div style="font-size:18px;line-height:1.3;font-weight:700;color:#0f172a;">' . esc($customerName) . '</div>
+        <div style="font-size:13px;line-height:1.6;color:#475569;">' . esc($customerCompany) . '</div>
+        <div style="font-size:13px;line-height:1.6;color:#475569;">' . esc($customerEmail) . '</div>
+        <div style="font-size:13px;line-height:1.6;color:#475569;">' . esc($customerPhone) . '</div>
         </td>
 
-        <td width="50%">
-        <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">FROM</div>
-        <div style="font-weight:700;">' . esc($companyName) . '</div>
-        <div style="font-size:13px;color:#555;">' . esc($companyAddressLine1) . ', ' . esc($companyAddressLine2) . '</div>
-        <div style="font-size:13px;color:#555;">' . esc($companyWebsite) . '</div>
+        <td width="50%" valign="top" style="padding-left:12px;">
+        <div style="font-size:12px;letter-spacing:0.05em;color:#6b7280;margin-bottom:8px;">FROM</div>
+        <div style="font-size:16px;line-height:1.3;font-weight:700;color:#0f172a;">' . esc($companyName) . '</div>
+        ' . $companyAdminHtml . '
+        <div style="font-size:13px;line-height:1.6;color:#475569;">' . $companyAddressInline . '</div>
+        <div style="font-size:13px;line-height:1.6;color:#475569;">' . esc($companyWebsite) . '</div>
         </td>
         </tr>
         </table>
 
         <!-- DESCRIPTION -->
-        <div style="margin-bottom:25px;">
-        <div style="font-size:13px;color:#6b7280;margin-bottom:8px;">DESCRIPTION</div>
-        <div style="font-size:14px;line-height:1.6;">
+        <div style="margin-bottom:24px;">
+        <div style="font-size:12px;letter-spacing:0.05em;color:#6b7280;margin-bottom:8px;">DESCRIPTION</div>
+        <div style="font-size:14px;line-height:1.7;color:#0f172a;">
         ' . esc($description !== '' ? $description : 'Complete estimation package prepared for your review.') . '
         </div>
         </div>
 
         <!-- PROJECTS -->
-        <div style="margin-bottom:25px;">
-        <div style="font-size:13px;color:#6b7280;margin-bottom:10px;">PROJECTS</div>
+        <div style="margin-bottom:24px;">
+        <div style="font-size:12px;letter-spacing:0.05em;color:#6b7280;margin-bottom:12px;">PROJECTS</div>
 
-        <table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
         '
             . $projectsHtml .
             '</table>'
             . '</div>' . 
-            '<div style="margin-top:28px;padding-top:8px;border-top:1px solid #e5e7eb;">' . '<table width="100%" cellspacing="0" cellpadding="0">' 
+            '<div style="margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;">' . '<table width="100%" cellspacing="0" cellpadding="0">' 
             . '<tr>' 
             . '<td style="vertical-align:top;width:56%;padding-right:18px;">' 
-            . '<div style="font-size:18px;text-transform:uppercase;letter-spacing:0.08em;color:#516173;margin-bottom:10px;">Financial Summary</div>' 
+            . '<div style="font-size:20px;text-transform:uppercase;letter-spacing:0.06em;color:#516173;margin-bottom:10px;line-height:1.1;">Financial Summary</div>' 
             . '</td>' . 
             '<td style="vertical-align:top;width:44%;">' . 
             '<table width="100%" cellspacing="0" cellpadding="0">' . $summaryLines . 
             '<tr><td colspan="2" style="padding:8px 0;border-top:1px solid #d1d5db;"></td></tr>' . 
             '<tr>
-            <td style="padding:5px 0;color:#111827;">Subtotal</td>
-            <td style="padding:5px 0;text-align:right;font-weight:700;">' . esc($this->formatCurrency($totals['subtotal'])) . '</td>
+            <td style="padding:6px 0;color:#111827;font-size:13px;line-height:1.4;">Subtotal</td>
+            <td style="padding:6px 0;text-align:right;font-weight:700;font-size:13px;line-height:1.4;">' . esc($this->formatCurrency($totals['subtotal'])) . '</td>
             
-            </tr>' . '<tr><td style="padding:5px 0;color:#059669;">'
+            </tr>' . '<tr><td style="padding:6px 0;color:#059669;font-size:13px;line-height:1.4;">'
              . esc($discountLabel) . 
-             '</td><td style="padding:5px 0;text-align:right;font-weight:700;color:#059669;">- ' 
+             '</td><td style="padding:6px 0;text-align:right;font-weight:700;color:#059669;font-size:13px;line-height:1.4;">- ' 
              . esc($this->formatCurrency($totals['discount_amount'])) . '</td></tr>' . 
              '<tr>
              <td colspan="2" style="padding:8px 0;border-top:1px solid #d1d5db;">
@@ -1682,19 +1734,14 @@ class QuotationController extends BaseApiController
              </td>
              </tr>' 
              . '<tr>
-             <td style="padding:6px 0;font-size:18px;font-weight:700;color:#111827;">Total</td>
-             <td style="padding:0;text-align:right;font-size:22px;font-weight:700;color:#111827;">' . esc($this->formatCurrency($totals['total'])) . '</td>
+             <td style="padding:6px 0;font-size:20px;font-weight:700;color:#111827;line-height:1.2;">Total</td>
+             <td style="padding:0;text-align:right;font-size:34px;font-weight:700;color:#111827;line-height:1.1;">' . esc($this->formatCurrency($totals['total'])) . '</td>
              </tr>' . 
              '</table>' . 
              '</td>' . 
              '</tr>' . 
              '</table>' . 
-             '</div>' . ($notes !== '' ? '
-             <div style="margin-top:16px;padding:12px;border:1px solid #e5e7eb;background:#f9fafb;border-radius:10px;">
-             <div style="font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Additional Notes</div>
-             <div style="font-size:13px;line-height:1.5;color:#1f2937;">' . nl2br(esc($notes)) . 
-             '</div>
-             </div>' : '') . $contractHtml . ($responseHtml !== '' ? '<div style="margin-top:28px;padding-top:20px;border-top:1px solid #e5e7eb;"><div style="font-size:18px;text-transform:uppercase;letter-spacing:0.08em;color:#059669;margin-bottom:12px;">Customer Response</div>' . $responseHtml . '</div>' : '') . '</div>' . '</div>' . '</div>';
+             '</div>' . $contractHtml . '</div>' . '</div>' . '</div>';
     }
 
     /**
@@ -1755,7 +1802,11 @@ class QuotationController extends BaseApiController
 
     private function getLogoDataUri(): ?string
     {
-        $logoPath = FCPATH . 'assets/images/logo.png';
+        $logoPath = FCPATH . 'assets/images/white-logo.png';
+        if (!is_file($logoPath)) {
+            $logoPath = FCPATH . 'assets/images/logo.png';
+        }
+
         if (!is_file($logoPath)) {
             return null;
         }
@@ -1795,9 +1846,20 @@ class QuotationController extends BaseApiController
             'company' => $this->normalizeNullableText($customer['company'] ?? null),
         ];
 
+        $quotation['business'] = [
+            'profile_id' => (int) ($quotation['business_profile_id'] ?? 0) ?: null,
+            'company_name' => $this->normalizeNullableText($quotation['business_name'] ?? null),
+            'admin_name' => $this->normalizeNullableText($quotation['business_admin_name'] ?? null),
+            'email' => $this->normalizeNullableText($quotation['business_email'] ?? null),
+            'phone' => $this->normalizeNullableText($quotation['business_phone'] ?? null),
+            'address' => $this->normalizeNullableText($quotation['business_address'] ?? null),
+            'website_url' => $this->normalizeNullableText($quotation['business_website_url'] ?? null),
+        ];
+
         unset($quotation['title']);
         unset($quotation['public_response_token_hash'], $quotation['public_response_token_issued_at'], $quotation['public_response_token_expires_at'], $quotation['public_response_token_used_at']);
         unset($quotation['customer_ref_id'], $quotation['customer_name'], $quotation['customer_email'], $quotation['customer_phone'], $quotation['customer_company']);
+        unset($quotation['business_profile_id'], $quotation['business_name'], $quotation['business_admin_name'], $quotation['business_email'], $quotation['business_phone'], $quotation['business_address'], $quotation['business_website_url']);
 
         return $quotation;
     }
@@ -2010,6 +2072,58 @@ class QuotationController extends BaseApiController
 
         $prefix = substr($local, 0, 1);
         return $prefix . str_repeat('*', max(2, strlen($local) - 1)) . '@' . $domain;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function resolveBusinessSnapshotPayload(array $data, bool $strictSelection = false): array
+    {
+        $businessProfileModel = new BusinessProfileModel();
+        $rawBusinessProfileId = $data['business_profile_id'] ?? ($data['businessProfileId'] ?? null);
+        $businessProfileId = is_numeric($rawBusinessProfileId) ? (int) $rawBusinessProfileId : 0;
+
+        $profile = null;
+
+        if ($businessProfileId > 0) {
+            $profile = $businessProfileModel->find($businessProfileId);
+            if (!is_array($profile)) {
+                return [
+                    'error' => 'Business profile not found.',
+                ];
+            }
+        } elseif ($strictSelection && $rawBusinessProfileId !== null) {
+            return [
+                'error' => 'A valid business profile id is required.',
+            ];
+        }
+
+        if (!is_array($profile)) {
+            $profile = $businessProfileModel->findActive();
+        }
+
+        if (!is_array($profile)) {
+            return [
+                'business_profile_id' => null,
+                'business_name' => 'Remote Estimation LLC',
+                'business_admin_name' => null,
+                'business_email' => 'info@apexestimating.com',
+                'business_phone' => '(214) 555-0183',
+                'business_address' => '4820 Commerce Drive, Suite 310, Dallas, TX 75201',
+                'business_website_url' => 'www.apexestimating.com',
+            ];
+        }
+
+        return [
+            'business_profile_id' => (int) ($profile['id'] ?? 0) ?: null,
+            'business_name' => $this->normalizeNullableText($profile['company_name'] ?? null),
+            'business_admin_name' => $this->normalizeNullableText($profile['admin_name'] ?? null),
+            'business_email' => $this->normalizeNullableText($profile['email'] ?? null),
+            'business_phone' => $this->normalizeNullableText($profile['phone'] ?? null),
+            'business_address' => $this->normalizeNullableText($profile['address'] ?? null),
+            'business_website_url' => $this->normalizeNullableText($profile['website_url'] ?? null),
+        ];
     }
 
     private function normalizeDiscountScope(mixed $value): string

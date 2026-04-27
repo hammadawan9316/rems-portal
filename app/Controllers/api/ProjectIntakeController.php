@@ -217,7 +217,7 @@ class ProjectIntakeController extends BaseApiController
         }
 
         $passwordHash = (string) ($file['access_password_hash'] ?? '');
-        $isAdmin = $this->isCurrentUserAdmin();
+        $isAdmin = is_admin();
         if (!$isAdmin && $passwordHash !== '') {
             $password = trim((string) ($this->request->getHeaderLine('X-File-Password') ?: $this->request->getGet('password')));
             if ($password === '' || !password_verify($password, $passwordHash)) {
@@ -232,34 +232,7 @@ class ProjectIntakeController extends BaseApiController
 
         return $this->response->download($fullPath, null)->setFileName((string) ($file['original_name'] ?? basename($fullPath)));
     }
-
-    private function isCurrentUserAdmin(): bool
-    {
-        $authHeader = $this->request->getHeaderLine('Authorization');
-        $token = JwtService::extractToken($authHeader);
-        if ($token === null) {
-            return false;
-        }
-
-        $payload = (new JwtService())->verifyAndDecode($token);
-        if (!is_array($payload)) {
-            return false;
-        }
-
-        $roles = $payload['roles'] ?? [];
-        if (!is_array($roles)) {
-            return false;
-        }
-
-        foreach ($roles as $role) {
-            if (strtolower(trim((string) $role)) === 'admin') {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
+    
     /**
      * @param array<string, mixed> $data
     * @return array<int, array<string, mixed>>

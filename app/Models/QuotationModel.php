@@ -15,6 +15,13 @@ class QuotationModel extends Model
     protected $allowedFields = [
         'customer_id',
         'source_request_id',
+        'business_profile_id',
+        'business_name',
+        'business_admin_name',
+        'business_email',
+        'business_phone',
+        'business_address',
+        'business_website_url',
         'quote_number',
         'description',
         'status',

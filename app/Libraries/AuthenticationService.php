@@ -5,6 +5,7 @@ namespace App\Libraries;
 use App\Models\UserModel;
 use App\Models\RoleModel;
 use App\Models\CustomerModel;
+use App\Models\BusinessProfileModel;
 use App\Models\PasswordResetModel;
 use Config\Email;
 
@@ -13,6 +14,7 @@ class AuthenticationService
     private UserModel $userModel;
     private RoleModel $roleModel;
     private CustomerModel $customerModel;
+    private BusinessProfileModel $businessProfileModel;
     private PasswordResetModel $resetModel;
     private JwtService $jwtService;
 
@@ -21,6 +23,7 @@ class AuthenticationService
         $this->userModel = new UserModel();
         $this->roleModel = new RoleModel();
         $this->customerModel = new CustomerModel();
+        $this->businessProfileModel = new BusinessProfileModel();
         $this->resetModel = new PasswordResetModel();
         $this->jwtService = new JwtService();
     }
@@ -87,11 +90,13 @@ class AuthenticationService
 
         // Generate tokens
         $tokens = $this->generateTokens($user);
+        $activeBusinessProfile = $this->businessProfileModel->findActive();
+        $user['active_business_profile'] = $activeBusinessProfile;
 
         return [
             'success' => true,
             'message' => 'User registered successfully',
-            'user' => $this->formatUserResponse($user),
+            'user' => $this->formatUserResponse($user, $activeBusinessProfile),
             'tokens' => $tokens,
         ];
     }
@@ -134,6 +139,7 @@ class AuthenticationService
 
         // Generate tokens
         $tokens = $this->generateTokens($user);
+
 
         return [
             'success' => true,
@@ -367,7 +373,7 @@ class AuthenticationService
     /**
      * Format user response
      */
-    private function formatUserResponse(array $user): array
+    private function formatUserResponse(array $user, ?array $businessProfile = null): array
     {
         return [
             'id' => $user['id'],
@@ -385,6 +391,7 @@ class AuthenticationService
                     'slug' => $role['slug'],
                 ];
             }, $user['roles'] ?? []),
+            'business_profile' => $businessProfile,
         ];
     }
 

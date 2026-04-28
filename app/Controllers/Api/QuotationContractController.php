@@ -64,7 +64,7 @@ class QuotationContractController extends BaseApiController
 
         $assignedClauses = $quotationContractModel->resolveAssignedClauses((int) ($saved['id'] ?? 0));
 
-        return $this->res->ok($this->formatResponse($contract, $saved, $assignedClauses), 'Quotation contract submitted successfully');
+        return $this->res->ok($this->formatResponse($contract, $saved, $assignedClauses, $this->buildBusinessInfoFromQuotation($context['quotation'] ?? [])), 'Quotation contract submitted successfully');
     }
 
     public function showByQuotation(int $quotationId)
@@ -92,7 +92,7 @@ class QuotationContractController extends BaseApiController
 
         $assignedClauses = $quotationContractModel->resolveAssignedClauses((int) ($assignment['id'] ?? 0));
 
-        return $this->res->ok($this->formatResponse($contract, $assignment, $assignedClauses), 'Quotation contract retrieved successfully');
+        return $this->res->ok($this->formatResponse($contract, $assignment, $assignedClauses, $this->buildBusinessInfoFromQuotation($quotation)), 'Quotation contract retrieved successfully');
     }
 
     public function assignToQuotation(int $quotationId)
@@ -113,13 +113,16 @@ class QuotationContractController extends BaseApiController
             return $this->res->notFound('Contract template not found');
         }
 
+        $business = $this->buildBusinessInfoFromQuotation($quotation);
+        $ownerDefault = $business['adminName'] ?? $business['companyName'] ?? null;
+
         $payload = [
             'quotation_id' => $quotationId,
             'contract_id' => $contractId,
-            'owner_name' => $this->normalizeNullableText($data['ownerName'] ?? ($contract['owner_name'] ?? null), 190),
-            'owner_signature' => $this->normalizeNullableText($data['ownerSignature'] ?? null, 65535),
-            'owner_signed_at' => $this->normalizeSignedAt($data['ownerSignedAt'] ?? ($data['owner_signed_at'] ?? null)),
-            'recipient_name' => $this->normalizeNullableText($data['recipientName'] ?? null, 190),
+            'owner_name' => $this->normalizeNullableText($data['ownerName'] ?? ($ownerDefault ?? ($contract['owner_name'] ?? null)), 190),
+            'owner_signature' => $this->normalizeNullableText($data['ownerSignature'] ?? ($ownerDefault ?? null), 65535),
+            'owner_signed_at' => $this->normalizeSignedAt($data['ownerSignedAt'] ?? ($data['owner_signed_at'] ?? null)) ?? date('Y-m-d H:i:s'),
+            'recipient_name' => $this->normalizeNullableText($data['recipientName'] ?? ($quotation['customer_name'] ?? null), 190),
             'recipient_signature' => $this->normalizeNullableText($data['recipientSignature'] ?? null, 65535),
         ];
 
@@ -148,7 +151,7 @@ class QuotationContractController extends BaseApiController
 
         $assignedClauses = $quotationContractModel->resolveAssignedClauses((int) ($saved['id'] ?? 0));
 
-        return $this->res->ok($this->formatResponse($template, $saved, $assignedClauses), 'Contract template assigned to quotation successfully');
+        return $this->res->ok($this->formatResponse($template, $saved, $assignedClauses, $this->buildBusinessInfoFromQuotation($quotation)), 'Contract template assigned to quotation successfully');
     }
 
     public function updateSignatures(int $quotationId)
@@ -211,7 +214,7 @@ class QuotationContractController extends BaseApiController
 
         $assignedClauses = $model->resolveAssignedClauses((int) ($saved['id'] ?? 0));
 
-        return $this->res->ok($this->formatResponse($template, $saved, $assignedClauses), 'Quotation contract signatures updated successfully');
+        return $this->res->ok($this->formatResponse($template, $saved, $assignedClauses, $this->buildBusinessInfoFromQuotation($quotation)), 'Quotation contract signatures updated successfully');
     }
 
     public function updateClauses(int $quotationId)
@@ -243,7 +246,7 @@ class QuotationContractController extends BaseApiController
 
         $assignedClauses = $assignmentModel->resolveAssignedClauses((int) ($assignment['id'] ?? 0));
 
-        return $this->res->ok($this->formatResponse($template, $assignment, $assignedClauses), 'Quotation contract clauses updated successfully');
+        return $this->res->ok($this->formatResponse($template, $assignment, $assignedClauses, $this->buildBusinessInfoFromQuotation($quotation)), 'Quotation contract clauses updated successfully');
     }
 
     private function validatePayload(array $payload): array
@@ -330,7 +333,7 @@ class QuotationContractController extends BaseApiController
     /**
      * @param array<int, array<string, mixed>> $assignedClauses
      */
-    private function formatResponse(array $template, array $assignment, array $assignedClauses): array
+    private function formatResponse(array $template, array $assignment, array $assignedClauses, ?array $business = null): array
     {
         $clauses = array_map(static function (array $clause): array {
             return [
@@ -356,6 +359,7 @@ class QuotationContractController extends BaseApiController
             'recipientName' => $this->normalizeNullableText($assignment['recipient_name'] ?? null, 190),
             'recipientSignature' => $this->normalizeNullableText($assignment['recipient_signature'] ?? null, 65535),
             'recipientSignedAt' => $this->normalizeNullableText($assignment['recipient_signed_at'] ?? null, 32),
+            'business' => $business,
         ];
     }
 
@@ -370,6 +374,7 @@ class QuotationContractController extends BaseApiController
             'contract' => $context['contract'] ?? null,
             'assignment' => $context['assignment'] ?? null,
             'clauses' => $context['clauses'] ?? [],
+            'business' => $context['business'] ?? null,
             'requiredSubmissionFields' => [
                 'fullName',
                 'signature',
@@ -419,6 +424,8 @@ class QuotationContractController extends BaseApiController
             ];
         }
 
+        $quotation['business'] = $this->buildBusinessInfoFromQuotation($quotation);
+
         $quotation['requiredSubmissionFields'] = ['fullName', 'signature', 'dateSigned'];
 
         return [
@@ -426,6 +433,24 @@ class QuotationContractController extends BaseApiController
             'contract' => $contract,
             'assignment' => $assignment,
             'clauses' => $clauses,
+            'business' => $quotation['business'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     * @return array<string, mixed>
+     */
+    private function buildBusinessInfoFromQuotation(array $quotation): array
+    {
+        return [
+            'profileId' => (int) ($quotation['business_profile_id'] ?? 0) ?: null,
+            'companyName' => $this->normalizeNullableText($quotation['business_name'] ?? null, 190),
+            'adminName' => $this->normalizeNullableText($quotation['business_admin_name'] ?? null, 190),
+            'email' => $this->normalizeNullableText($quotation['business_email'] ?? null, 190),
+            'phone' => $this->normalizeNullableText($quotation['business_phone'] ?? null, 190),
+            'address' => $this->normalizeNullableText($quotation['business_address'] ?? null, 65535),
+            'websiteUrl' => $this->normalizeNullableText($quotation['business_website_url'] ?? null, 65535),
         ];
     }
 

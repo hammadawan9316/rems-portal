@@ -16,6 +16,9 @@ use Config\Square;
 
 class ProjectIntakeController extends BaseApiController
 {
+    private const REQUEST_TOTAL_UPLOAD_LIMIT_KB = 102400;
+    private const FILE_UPLOAD_LIMIT_KB = 512000;
+
     public function submit()
     {
         $data = $this->normalizeIncomingPayload($this->getRequestData(false));
@@ -466,6 +469,10 @@ class ProjectIntakeController extends BaseApiController
         $byProject = $emptyByProject;
         $uploadedAll = [];
         $directory = 'projects/' . date('Y') . '/' . date('m');
+        $uploadPlan = [];
+        $totalUploadSizeKb = 0.0;
+        $projectFileBatches = [];
+        $legacyFlatFiles = [];
 
         $projectGroups = $allFiles['projects'] ?? null;
         if (is_array($projectGroups)) {
@@ -480,70 +487,69 @@ class ProjectIntakeController extends BaseApiController
                     continue;
                 }
 
-                $result = $this->uploadService->uploadMany($flatProjectFiles, $directory, [], 512000);
-                $uploaded = is_array($result['data'] ?? null) ? $result['data'] : [];
-
-                if (($result['status'] ?? false) !== true && $uploaded === []) {
-                    $errorMessages = [];
-                    $uploadErrors = $result['errors'] ?? [];
-                    foreach ($uploadErrors as $error) {
-                        if (is_array($error['errors'] ?? null)) {
-                            foreach ($error['errors'] as $fieldError) {
-                                $errorMessages[] = $fieldError;
-                            }
-                        } elseif (isset($error['message'])) {
-                            $errorMessages[] = $error['message'];
-                        }
-                    }
-                    $errorMsg = !empty($errorMessages) ? implode(' | ', $errorMessages) : 'Unable to store uploaded files for project index ' . $index . '.';
-                    return ['error' => $errorMsg];
-                }
-
-                $indexInt = (int) $index;
-                if (!array_key_exists($indexInt, $byProject)) {
-                    $byProject[$indexInt] = [];
-                }
-                $byProject[$indexInt] = array_values(array_merge($byProject[$indexInt], $uploaded));
-                $uploadedAll = array_values(array_merge($uploadedAll, $uploaded));
+                $projectSizeKb = $this->sumUploadedFileSizeKb($flatProjectFiles);
+                $totalUploadSizeKb += $projectSizeKb;
+                $projectFileBatches[(int) $index] = $flatProjectFiles;
+                $uploadPlan[] = [
+                    'label' => 'Project ' . ((int) $index + 1),
+                    'size_kb' => $projectSizeKb,
+                    'count' => count($flatProjectFiles),
+                ];
             }
         }
 
         $legacyFiles = $allFiles['files'] ?? null;
         if ($legacyFiles !== null) {
+            $this->flattenFiles(['files' => $legacyFiles], $legacyFlatFiles);
+            if ($legacyFlatFiles !== []) {
+                $legacySizeKb = $this->sumUploadedFileSizeKb($legacyFlatFiles);
+                $totalUploadSizeKb += $legacySizeKb;
+                $uploadPlan[] = [
+                    'label' => 'Legacy files',
+                    'size_kb' => $legacySizeKb,
+                    'count' => count($legacyFlatFiles),
+                ];
+            }
+        }
+
+        if ($totalUploadSizeKb > self::REQUEST_TOTAL_UPLOAD_LIMIT_KB) {
+            return ['error' => $this->buildUploadTotalLimitError($uploadPlan, $totalUploadSizeKb)];
+        }
+
+        foreach ($projectFileBatches as $index => $flatProjectFiles) {
+            $result = $this->uploadService->uploadMany($flatProjectFiles, $directory, [], self::FILE_UPLOAD_LIMIT_KB);
+            $uploaded = is_array($result['data'] ?? null) ? $result['data'] : [];
+
+            if (($result['status'] ?? false) !== true && $uploaded === []) {
+                return ['error' => $this->buildUploadFailureMessage('project ' . ((int) $index + 1), $flatProjectFiles, $result)];
+            }
+
+            if (!array_key_exists($index, $byProject)) {
+                $byProject[(int) $index] = [];
+            }
+            $byProject[(int) $index] = array_values(array_merge($byProject[(int) $index], $uploaded));
+            $uploadedAll = array_values(array_merge($uploadedAll, $uploaded));
+        }
+
+        if ($legacyFlatFiles !== []) {
             if ($projectCount > 1 && $uploadedAll === []) {
                 return ['error' => 'For multiple projects use project-specific file fields: projects[index][files][].'];
             }
 
-            $flatLegacyFiles = [];
-            $this->flattenFiles(['files' => $legacyFiles], $flatLegacyFiles);
-            if ($flatLegacyFiles !== []) {
-                $result = $this->uploadService->uploadMany($flatLegacyFiles, $directory, [], 512000);
-                $uploaded = is_array($result['data'] ?? null) ? $result['data'] : [];
+            $result = $this->uploadService->uploadMany($legacyFlatFiles, $directory, [], self::FILE_UPLOAD_LIMIT_KB);
+            $uploaded = is_array($result['data'] ?? null) ? $result['data'] : [];
 
-                if (($result['status'] ?? false) !== true && $uploaded === []) {
-                    $errorMessages = [];
-                    $uploadErrors = $result['errors'] ?? [];
-                    foreach ($uploadErrors as $error) {
-                        if (is_array($error['errors'] ?? null)) {
-                            foreach ($error['errors'] as $fieldError) {
-                                $errorMessages[] = $fieldError;
-                            }
-                        } elseif (isset($error['message'])) {
-                            $errorMessages[] = $error['message'];
-                        }
-                    }
-                    $errorMsg = !empty($errorMessages) ? implode(' | ', $errorMessages) : 'Unable to store uploaded files.';
-                    return ['error' => $errorMsg];
-                }
-
-                $targetIndex = 0;
-                if (!array_key_exists($targetIndex, $byProject)) {
-                    $byProject[$targetIndex] = [];
-                }
-
-                $byProject[$targetIndex] = array_values(array_merge($byProject[$targetIndex], $uploaded));
-                $uploadedAll = array_values(array_merge($uploadedAll, $uploaded));
+            if (($result['status'] ?? false) !== true && $uploaded === []) {
+                return ['error' => $this->buildUploadFailureMessage('legacy files', $legacyFlatFiles, $result)];
             }
+
+            $targetIndex = 0;
+            if (!array_key_exists($targetIndex, $byProject)) {
+                $byProject[$targetIndex] = [];
+            }
+
+            $byProject[$targetIndex] = array_values(array_merge($byProject[$targetIndex], $uploaded));
+            $uploadedAll = array_values(array_merge($uploadedAll, $uploaded));
         }
 
         return [
@@ -568,6 +574,81 @@ class ProjectIntakeController extends BaseApiController
                 $this->flattenFiles($item, $bucket);
             }
         }
+    }
+
+    /**
+     * @param array<int, UploadedFile> $files
+     */
+    private function sumUploadedFileSizeKb(array $files): float
+    {
+        $total = 0.0;
+
+        foreach ($files as $file) {
+            if (!$file instanceof UploadedFile) {
+                continue;
+            }
+
+            $total += (float) $file->getSizeByUnit('kb');
+        }
+
+        return round($total, 2);
+    }
+
+    /**
+     * @param array<int, UploadedFile> $files
+     * @param array{status:bool,message:string,data?:array,errors?:array} $result
+     */
+    private function buildUploadFailureMessage(string $contextLabel, array $files, array $result): string
+    {
+        $details = [];
+        foreach ($files as $file) {
+            if (!$file instanceof UploadedFile) {
+                continue;
+            }
+
+            $sizeKb = (float) $file->getSizeByUnit('kb');
+            $details[] = $file->getClientName() . ' (' . $this->formatUploadSizeKb($sizeKb) . ')';
+        }
+
+        $errorMessages = [];
+        $uploadErrors = $result['errors'] ?? [];
+        foreach ($uploadErrors as $error) {
+            if (is_array($error['errors'] ?? null)) {
+                foreach ($error['errors'] as $fieldError) {
+                    $errorMessages[] = (string) $fieldError;
+                }
+            } elseif (isset($error['message'])) {
+                $errorMessages[] = (string) $error['message'];
+            }
+        }
+
+        $reason = $errorMessages !== [] ? implode(' | ', $errorMessages) : 'Upload failed.';
+        $fileList = $details !== [] ? ' Files: ' . implode(', ', $details) . '.' : '';
+
+        return 'Unable to store uploaded files for ' . $contextLabel . ': ' . $reason . $fileList;
+    }
+
+    /**
+     * @param array<int, array{label:string,size_kb:float,count:int}> $uploadPlan
+     */
+    private function buildUploadTotalLimitError(array $uploadPlan, float $totalUploadSizeKb): string
+    {
+        $parts = [];
+        foreach ($uploadPlan as $entry) {
+            $label = (string) ($entry['label'] ?? 'Files');
+            $sizeKb = (float) ($entry['size_kb'] ?? 0);
+            $count = (int) ($entry['count'] ?? 0);
+
+            $parts[] = $label . ': ' . $this->formatUploadSizeKb($sizeKb) . ' across ' . $count . ' file(s)';
+        }
+
+        $limitMb = $this->formatUploadSizeKb(self::REQUEST_TOTAL_UPLOAD_LIMIT_KB);
+        return 'Total uploaded files exceed the request limit of ' . $limitMb . '. Current total is ' . $this->formatUploadSizeKb($totalUploadSizeKb) . '.' . ($parts !== [] ? ' Breakdown: ' . implode('; ', $parts) . '.' : '');
+    }
+
+    private function formatUploadSizeKb(float $sizeKb): string
+    {
+        return number_format($sizeKb / 1024, 2) . 'MB';
     }
 
     /**

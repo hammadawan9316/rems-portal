@@ -193,12 +193,13 @@ class QuotationController extends BaseApiController
 
         $quotationContractId = null;
         if (is_array($contract)) {
+            $businessOwnerPayload = $this->buildQuotationContractBusinessPayload($businessSnapshot);
             $savedAssignment = $quotationContractModel->saveAssignmentWithClauses([
                 'quotation_id' => $quotationId,
                 'contract_id' => $contractId,
-                'owner_name' => $this->normalizeNullableText($data['ownerName'] ?? ($contract['owner_name'] ?? null)),
-                'owner_signature' => $this->normalizeNullableText($data['ownerSignature'] ?? ($data['owner_signature'] ?? null)),
-                'owner_signed_at' => $this->normalizeDateTimeString($data['ownerSignedAt'] ?? ($data['owner_signed_at'] ?? null)),
+                'owner_name' => $this->normalizeNullableText($data['ownerName'] ?? ($businessOwnerPayload['owner_name'] ?? ($contract['owner_name'] ?? null))),
+                'owner_signature' => $this->normalizeNullableText($data['ownerSignature'] ?? ($businessOwnerPayload['owner_signature'] ?? ($data['owner_signature'] ?? null))),
+                'owner_signed_at' => $this->normalizeDateTimeString($data['ownerSignedAt'] ?? ($data['owner_signed_at'] ?? null)) ?? ($businessOwnerPayload['owner_signed_at'] ?? null),
                 'recipient_name' => $this->normalizeNullableText($data['recipientName'] ?? ($data['recipient_name'] ?? ($request['client_name'] ?? null))),
                 'recipient_signature' => $this->normalizeNullableText($data['recipientSignature'] ?? ($data['recipient_signature'] ?? null)),
                 'recipient_signed_at' => $this->normalizeDateTimeString($data['dateSigned'] ?? ($data['signedAt'] ?? ($data['recipient_signed_at'] ?? null))),
@@ -747,9 +748,16 @@ class QuotationController extends BaseApiController
         }
 
         if ($contractAssignmentRequested && is_array($contractToAssign)) {
+            $businessOwnerPayload = $this->buildQuotationContractBusinessPayload($quotation);
             $savedAssignment = $quotationContractModel->saveAssignmentWithClauses([
                 'quotation_id' => $id,
                 'contract_id' => (int) ($contractToAssign['id'] ?? 0),
+                'owner_name' => $this->normalizeNullableText($data['ownerName'] ?? ($businessOwnerPayload['owner_name'] ?? ($quotation['business_admin_name'] ?? ($quotation['business_name'] ?? null)))),
+                'owner_signature' => $this->normalizeNullableText($data['ownerSignature'] ?? ($businessOwnerPayload['owner_signature'] ?? ($quotation['business_admin_name'] ?? ($quotation['business_name'] ?? null)))),
+                'owner_signed_at' => $this->normalizeDateTimeString($data['ownerSignedAt'] ?? ($data['owner_signed_at'] ?? null)) ?? ($businessOwnerPayload['owner_signed_at'] ?? null),
+                'recipient_name' => $this->normalizeNullableText($data['recipientName'] ?? ($quotation['customer_name'] ?? null)),
+                'recipient_signature' => $this->normalizeNullableText($data['recipientSignature'] ?? ($data['recipient_signature'] ?? null)),
+                'recipient_signed_at' => $this->normalizeDateTimeString($data['recipientSignedAt'] ?? ($data['recipient_signed_at'] ?? null)),
             ], $this->extractTemplateClauseIds($contractToAssign));
 
             if (!is_array($savedAssignment)) {
@@ -1486,7 +1494,8 @@ class QuotationController extends BaseApiController
             $projectIndex++;
 
             $services = is_array($project['services'] ?? null) ? $project['services'] : [];
-            $amount = $this->formatCurrency($this->toFloat($project['estimated_amount'] ?? 0));
+            $lineTotal = $this->calculateProjectLineTotal($project);
+            $amount = $this->formatCurrency($lineTotal);
 
             $projectTitle = trim((string) ($project['project_title'] ?? 'Project'));
             $categoryName = trim((string) ($project['category'] ?? 'General Scope'));
@@ -1496,11 +1505,15 @@ class QuotationController extends BaseApiController
             $projectDateLabel = $deadlineDate !== '' ? date('M j, Y', strtotime($deadlineDate) ?: time()) : $quoteDateLabel;
             $paymentType = strtolower(trim((string) ($project['payment_type'] ?? 'fixed_rate')));
             $hours = $this->toFloat($project['hourly_hours'] ?? 0);
-            $rate = $this->toFloat($project['hourly_rate'] ?? 0);
+            $rate = $this->toFloat($project['hourly_rate'] ?? ($project['estimated_amount'] ?? 0));
 
             $pricingMeta = 'Fixed price';
-            if ($paymentType === 'hourly' && $hours > 0 && $rate > 0) {
-                $pricingMeta = number_format($hours, 0) . ' hrs x ' . $this->formatCurrency($rate) . '/hr';
+            if ($paymentType === 'hourly') {
+                if ($hours > 0) {
+                    $pricingMeta = number_format($hours, 0) . ' hrs x ' . $this->formatCurrency($rate) . '/hr = ' . $amount;
+                } else {
+                    $pricingMeta = 'Hourly rate';
+                }
             }
 
             $serviceBadges = '';
@@ -1612,7 +1625,9 @@ class QuotationController extends BaseApiController
 
         $discountLabel = 'Discount';
         if (($totals['discount_type'] ?? '') === 'percentage') {
-            $discountLabel = 'Discount (' . $this->toFloat($totals['discount_value'] ?? 0) . '%)';
+            $discountLabel = 'Discount (Percentage - ' . $this->toFloat($totals['discount_value'] ?? 0) . '%)';
+        } elseif (($totals['discount_type'] ?? '') === 'fixed_amount') {
+            $discountLabel = 'Discount (Fixed Amount)';
         }
 
         $actionsHtml = '';
@@ -1629,12 +1644,14 @@ class QuotationController extends BaseApiController
             $contractTitle = $contractName !== '' ? $contractName : 'Contract';
 
             $contractHtml .= '<div style="margin:28px 0 0 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">';
+            $contractHtml .= '<table width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;"><tr><td valign="top">';
             $contractHtml .= '<div style="font-size:16px;font-weight:700;color:#111827;margin:0 0 6px 0;">' . esc($contractTitle) . '</div>';
             $contractHtml .= '<div style="font-size:13px;color:#4b5563;margin:0 0 10px 0;">Open contract preview and sign digitally.</div>';
+            $contractHtml .= '</td><td align="right" valign="middle" style="padding-left:16px;white-space:nowrap;">';
             if ($contractUrl !== '') {
                 $contractHtml .= '<a href="' . esc($contractUrl) . '" style="display:inline-block;padding:9px 14px;background:#1f2937;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Open Contract Link</a>';
             }
-            $contractHtml .= '</div>';
+            $contractHtml .= '</td></tr></table></div>';
         }
 
         $expiryHtml = $expiryLabel !== ''
@@ -1772,7 +1789,7 @@ class QuotationController extends BaseApiController
                 continue;
             }
 
-            $subtotal += $this->toFloat($project['estimated_amount'] ?? 0);
+            $subtotal += $this->calculateProjectLineTotal($project);
         }
 
         $discountType = (string) ($quotation['discount_type'] ?? '');
@@ -1795,6 +1812,26 @@ class QuotationController extends BaseApiController
             'discount_type' => $discountType,
             'discount_value' => $discountValue,
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $project
+     */
+    private function calculateProjectLineTotal(array $project): float
+    {
+        $baseAmount = $this->toFloat($project['estimated_amount'] ?? 0);
+        $paymentType = strtolower(trim((string) ($project['payment_type'] ?? 'fixed_rate')));
+
+        if ($paymentType !== 'hourly') {
+            return round($baseAmount, 2);
+        }
+
+        $hours = $this->toFloat($project['hourly_hours'] ?? 0);
+        if ($hours <= 0) {
+            return round($baseAmount, 2);
+        }
+
+        return round($baseAmount * $hours, 2);
     }
 
     private function formatCurrency(float $amount): string
@@ -2032,6 +2069,24 @@ class QuotationController extends BaseApiController
             'token' => $token,
             'action' => strtolower(trim($action)),
         ]);
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     * @return array{owner_name:?string,owner_signature:?string,owner_signed_at:?string}
+     */
+    private function buildQuotationContractBusinessPayload(array $quotation): array
+    {
+        $ownerName = $this->normalizeNullableText($quotation['business_name'] ?? null);
+        if ($ownerName === null) {
+            $ownerName = $this->normalizeNullableText($quotation['business_name'] ?? null);
+        }
+
+        return [
+            'owner_name' => $ownerName,
+            'owner_signature' => $ownerName,
+            'owner_signed_at' => date('Y-m-d H:i:s'),
+        ];
     }
 
     private function buildPublicContractPreviewUrl(string $token): string

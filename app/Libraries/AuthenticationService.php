@@ -139,14 +139,28 @@ class AuthenticationService
 
         // Generate tokens
         $tokens = $this->generateTokens($user);
+        $activeBusinessProfile = $this->getActiveBusinessProfile();
 
 
         return [
             'success' => true,
             'message' => 'Login successful',
-            'user' => $this->formatUserResponse($user),
+            'user' => $this->formatUserResponse($user, $activeBusinessProfile),
             'tokens' => $tokens,
         ];
+    }
+
+    /**
+     * Get the currently authenticated user by ID.
+     */
+    public function getCurrentUser(int $userId): ?array
+    {
+        $user = $this->userModel->getUserWithRoles($userId);
+        if (!is_array($user)) {
+            return null;
+        }
+
+        return $this->formatUserResponse($user, $this->getActiveBusinessProfile());
     }
 
     /**
@@ -375,6 +389,8 @@ class AuthenticationService
      */
     private function formatUserResponse(array $user, ?array $businessProfile = null): array
     {
+        $activeBusinessProfile = $businessProfile ?? $this->getActiveBusinessProfile();
+
         return [
             'id' => $user['id'],
             'email' => $user['email'],
@@ -391,8 +407,14 @@ class AuthenticationService
                     'slug' => $role['slug'],
                 ];
             }, $user['roles'] ?? []),
-            'business_profile' => $businessProfile,
+            'business_profile' => $activeBusinessProfile,
+            'active_business_profile' => $activeBusinessProfile,
         ];
+    }
+
+    private function getActiveBusinessProfile(): ?array
+    {
+        return $this->businessProfileModel->findActive();
     }
 
     /**

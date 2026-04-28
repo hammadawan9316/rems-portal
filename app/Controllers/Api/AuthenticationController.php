@@ -267,29 +267,6 @@ class AuthenticationController extends BaseApiController
             return null;
         }
 
-        $userModel = new \App\Models\UserModel();
-        $user = $userModel->getUserWithRoles($userId);
-
-        if (!is_array($user)) {
-            return null;
-        }
-
-        return [
-            'id' => $user['id'],
-            'email' => $user['email'],
-            'name' => $user['name'],
-            'phone' => $user['phone'],
-            'company' => $user['company'],
-            'is_active' => $user['is_active'],
-            'email_verified_at' => $user['email_verified_at'],
-            'last_login_at' => $user['last_login_at'],
-            'roles' => array_map(static function ($role) {
-                return [
-                    'id' => $role['id'],
-                    'name' => $role['name'],
-                    'slug' => $role['slug'],
-                ];
-            }, $user['roles'] ?? []),
-        ];
+        return $this->authService->getCurrentUser($userId);
     }
 }

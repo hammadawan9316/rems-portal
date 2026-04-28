@@ -62,6 +62,7 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
             $routes->get('business_profiles/(:num)', 'BusinessProfileController::show/$1');
             $routes->post('business_profiles/(:num)', 'BusinessProfileController::update/$1');
             $routes->patch('business_profiles/(:num)', 'BusinessProfileController::update/$1');
+            $routes->post('business_profiles/(:num)/toggle-active', 'BusinessProfileController::toggleActive/$1');
             $routes->delete('business_profiles/(:num)', 'BusinessProfileController::delete/$1');
             $routes->post('customers', 'CustomerController::create');
             $routes->get('customers', 'CustomerController::index');

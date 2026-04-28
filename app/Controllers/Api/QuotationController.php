@@ -2081,27 +2081,7 @@ class QuotationController extends BaseApiController
     private function resolveBusinessSnapshotPayload(array $data, bool $strictSelection = false): array
     {
         $businessProfileModel = new BusinessProfileModel();
-        $rawBusinessProfileId = $data['business_profile_id'] ?? ($data['businessProfileId'] ?? null);
-        $businessProfileId = is_numeric($rawBusinessProfileId) ? (int) $rawBusinessProfileId : 0;
-
-        $profile = null;
-
-        if ($businessProfileId > 0) {
-            $profile = $businessProfileModel->find($businessProfileId);
-            if (!is_array($profile)) {
-                return [
-                    'error' => 'Business profile not found.',
-                ];
-            }
-        } elseif ($strictSelection && $rawBusinessProfileId !== null) {
-            return [
-                'error' => 'A valid business profile id is required.',
-            ];
-        }
-
-        if (!is_array($profile)) {
-            $profile = $businessProfileModel->findActive();
-        }
+        $profile = $businessProfileModel->findActive();
 
         if (!is_array($profile)) {
             return [

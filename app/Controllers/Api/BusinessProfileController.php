@@ -126,6 +126,48 @@ class BusinessProfileController extends BaseApiController
         return $this->res->ok(null, 'Business profile deleted successfully.');
     }
 
+    public function toggleActive(int $id)
+    {
+        $model = new BusinessProfileModel();
+        $existing = $model->find($id);
+        if (!is_array($existing)) {
+            return $this->res->notFound('Business profile not found.');
+        }
+
+        $isCurrentlyActive = (bool) ($existing['is_active'] ?? false);
+
+        if ($isCurrentlyActive) {
+            $fallback = $model->where('id !=', $id)
+                ->orderBy('updated_at', 'DESC')
+                ->orderBy('id', 'DESC')
+                ->first();
+
+            if (!is_array($fallback)) {
+                return $this->res->badRequest('At least one business profile must remain active.');
+            }
+
+            $fallbackId = (int) ($fallback['id'] ?? 0);
+            if ($fallbackId <= 0) {
+                return $this->res->badRequest('At least one business profile must remain active.');
+            }
+
+            $model->update($id, ['is_active' => 0]);
+            $model->update($fallbackId, ['is_active' => 1]);
+            $this->deactivateOtherProfiles($model, $fallbackId);
+
+            $updated = $model->find($fallbackId);
+
+            return $this->res->ok($updated, 'Business profile active status updated successfully.');
+        }
+
+        $model->update($id, ['is_active' => 1]);
+        $this->deactivateOtherProfiles($model, $id);
+
+        $updated = $model->find($id);
+
+        return $this->res->ok($updated, 'Business profile active status updated successfully.');
+    }
+
     /**
      * @param array<string, mixed> $data
      * @return array<string, string>

@@ -152,7 +152,7 @@ class ProjectIntakeController extends BaseApiController
             $squareResults
         );
 
-        $this->queueCustomerSubmittedNotification($clientEmail, $clientName, $requestId);
+        $this->queueCustomerSubmittedNotification($clientEmail, $clientName, $requestNumber);
 
         $isMultiple = count($projectItems) > 1;
         $singleProject = $createdRequestProjects[0] ?? null;
@@ -235,10 +235,10 @@ class ProjectIntakeController extends BaseApiController
 
         return $this->response->download($fullPath, null)->setFileName((string) ($file['original_name'] ?? basename($fullPath)));
     }
-    
+
     /**
      * @param array<string, mixed> $data
-    * @return array<int, array<string, mixed>>
+     * @return array<int, array<string, mixed>>
      */
     private function extractProjectItems(array $data): array
     {
@@ -682,7 +682,7 @@ class ProjectIntakeController extends BaseApiController
 
         $contentParts = [
             '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">A new quotation request with ' . esc((string) $projectCount) . ' project(s) was submitted from the website.</p>',
-            
+
             // Request Header
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse;">',
             '<tr><td style="padding:12px;background:#0f172a;"><strong style="color:#ffffff;">Request Details</strong></td></tr>',
@@ -808,7 +808,7 @@ class ProjectIntakeController extends BaseApiController
 
         // Square Status Summary
         $squareStatuses = array_column($squareResults, 'status');
-        $deferredCount = count(array_filter($squareStatuses, static fn ($s) => $s === 'deferred'));
+        $deferredCount = count(array_filter($squareStatuses, static fn($s) => $s === 'deferred'));
 
         $contentParts[] = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse;">';
         $contentParts[] = '<tr><td style="padding:12px;background:#f8fafc;border-left:3px solid #0f172a;"><strong style="color:#0f172a;">Square Integration Status</strong></td></tr>';
@@ -838,9 +838,8 @@ class ProjectIntakeController extends BaseApiController
     private function queueCustomerSubmittedNotification(
         string $email,
         string $name,
-        ?int $requestId
-    ): void
-    {
+        ?int $requestNumber
+    ): void {
         $to = trim($email);
         if ($to === '') {
             return;
@@ -848,17 +847,17 @@ class ProjectIntakeController extends BaseApiController
 
         $recipientName = $name === '' ? 'Customer' : $name;
         $contentHtml = '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;">Thank you for your quotation request.</p>'
-            . ($requestId !== null ? '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;"><strong>Request ID:</strong> #' . esc((string) $requestId) . '</p>' : '')
+            . ($requestNumber !== null ? '<p style="margin:0 0 14px 0;font-size:15px;line-height:1.6;"><strong>Request Number:</strong> #' . esc((string) $requestNumber) . '</p>' : '')
             . '<p style="margin:0;font-size:15px;line-height:1.6;">Our team will reach out to you within 3 hours.</p>';
 
         $emailQueue = service('emailQueue');
-        $subject = 'Thank you for your request' . ($requestId !== null ? ' #' . $requestId : '');
+        $subject = 'Thank you for your request' . ($requestNumber !== null ? ' #' . $requestNumber : '');
         $body = $emailQueue->renderTemplate([
             'subject' => $subject,
             'recipientName' => $recipientName,
             'headline' => 'Thank You',
             'contentHtml' => $contentHtml,
-        
+
         ]);
 
         queue_email_job($to, $subject, $body, ['mail_type' => 'html']);
@@ -874,8 +873,7 @@ class ProjectIntakeController extends BaseApiController
         array $uploadedFiles,
         ?int $quotationRequestId = null,
         ?int $requestProjectIndex = null
-    ): array
-    {
+    ): array {
         $files = [];
 
         foreach ($uploadedFiles as $uploadedFile) {
@@ -989,11 +987,11 @@ class ProjectIntakeController extends BaseApiController
             return [];
         }
 
-        $projectIds = array_map(static fn (array $project): int => (int) ($project['id'] ?? 0), $projects);
-        $projectIds = array_values(array_filter($projectIds, static fn (int $id): bool => $id > 0));
+        $projectIds = array_map(static fn(array $project): int => (int) ($project['id'] ?? 0), $projects);
+        $projectIds = array_values(array_filter($projectIds, static fn(int $id): bool => $id > 0));
 
-        $categoryIds = array_map(static fn (array $project): int => (int) ($project['category_id'] ?? 0), $projects);
-        $categoryIds = array_values(array_unique(array_filter($categoryIds, static fn (int $id): bool => $id > 0)));
+        $categoryIds = array_map(static fn(array $project): int => (int) ($project['category_id'] ?? 0), $projects);
+        $categoryIds = array_values(array_unique(array_filter($categoryIds, static fn(int $id): bool => $id > 0)));
 
         $categoriesById = [];
         if ($categoryIds !== []) {
@@ -1178,7 +1176,7 @@ class ProjectIntakeController extends BaseApiController
         }
 
         $ids = array_map('intval', $value);
-        $ids = array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
+        $ids = array_values(array_unique(array_filter($ids, static fn(int $id): bool => $id > 0)));
 
         return $ids;
     }
@@ -1286,7 +1284,7 @@ class ProjectIntakeController extends BaseApiController
                 }
 
                 $serviceCategoryIds = array_map(
-                    static fn (array $categoryRow): int => (int) ($categoryRow['id'] ?? 0),
+                    static fn(array $categoryRow): int => (int) ($categoryRow['id'] ?? 0),
                     is_array($service['categories'] ?? null) ? $service['categories'] : []
                 );
 
@@ -1310,7 +1308,7 @@ class ProjectIntakeController extends BaseApiController
             $item['category'] = trim((string) ($category['name'] ?? ''));
             $item['services'] = array_values(array_unique($serviceNames));
             $item['category_id'] = $categoryId;
-            $item['service_ids'] = array_values(array_unique(array_filter($serviceIds, static fn (int $id): bool => $id > 0)));
+            $item['service_ids'] = array_values(array_unique(array_filter($serviceIds, static fn(int $id): bool => $id > 0)));
 
             $resolved[] = $item;
         }

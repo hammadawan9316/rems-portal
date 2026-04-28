@@ -2077,9 +2077,9 @@ class QuotationController extends BaseApiController
      */
     private function buildQuotationContractBusinessPayload(array $quotation): array
     {
-        $ownerName = $this->normalizeNullableText($quotation['business_name'] ?? null);
+        $ownerName = $this->normalizeNullableText($quotation['business_admin_name'] ?? null);
         if ($ownerName === null) {
-            $ownerName = $this->normalizeNullableText($quotation['business_name'] ?? null);
+            $ownerName = $this->normalizeNullableText($quotation['business_admin_name'] ?? null);
         }
 
         return [

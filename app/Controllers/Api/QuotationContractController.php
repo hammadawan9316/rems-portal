@@ -445,12 +445,12 @@ class QuotationContractController extends BaseApiController
     {
         return [
             'profileId' => (int) ($quotation['business_profile_id'] ?? 0) ?: null,
-            'companyName' => $this->normalizeNullableText($quotation['business_name'] ?? null, 190),
-            'adminName' => $this->normalizeNullableText($quotation['business_admin_name'] ?? null, 190),
+            'company_name' => $this->normalizeNullableText($quotation['business_name'] ?? null, 190),
+            'admin_name' => $this->normalizeNullableText($quotation['business_admin_name'] ?? null, 190),
             'email' => $this->normalizeNullableText($quotation['business_email'] ?? null, 190),
             'phone' => $this->normalizeNullableText($quotation['business_phone'] ?? null, 190),
             'address' => $this->normalizeNullableText($quotation['business_address'] ?? null, 65535),
-            'websiteUrl' => $this->normalizeNullableText($quotation['business_website_url'] ?? null, 65535),
+            'website_url' => $this->normalizeNullableText($quotation['business_website_url'] ?? null, 65535),
         ];
     }
 

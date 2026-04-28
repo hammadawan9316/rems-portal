@@ -389,12 +389,10 @@ class QuotationController extends BaseApiController
 
         $assignment = model(QuotationContractModel::class)->findByQuotationId($id);
         $contractName = null;
-        $contractTemplateName = null;
         if (is_array($assignment)) {
             $contract = (new ContractModel())->findDetailed((int) ($assignment['contract_id'] ?? 0));
             if (is_array($contract)) {
                 $contractName = $this->normalizeNullableText($contract['contract_name'] ?? null);
-                $contractTemplateName = $this->normalizeNullableText($contract['template_name'] ?? null);
             }
         }
 
@@ -405,8 +403,8 @@ class QuotationController extends BaseApiController
             'contractUrl' => $contractPreviewUrl,
             'publicToken' => $plainToken,
             'contractName' => $contractName,
-            'contractTemplateName' => $contractTemplateName,
             'expiryLabel' => $expiryHuman,
+            'quotationStatus' => $status,
         ]);
 
         $body = $emailQueue->renderTemplate([
@@ -858,7 +856,19 @@ class QuotationController extends BaseApiController
             ->findAll();
         $projects = $this->formatProjectsForResponse($projects);
 
-        $pdfHtml = $this->buildQuotationPdfHtml($quotation, $projects);
+        $tokenResult = $quotationModel->issuePublicResponseToken($id, self::PUBLIC_TOKEN_EXPIRY_DAYS);
+        $plainToken = is_array($tokenResult) ? (string) ($tokenResult['token'] ?? '') : '';
+        $acceptUrl = $plainToken !== '' ? $this->buildPublicQuotationActionUrl($plainToken, 'accept') : '';
+        $rejectUrl = $plainToken !== '' ? $this->buildPublicQuotationActionUrl($plainToken, 'reject') : '';
+
+        $quotationStatus = strtolower(trim((string) ($quotation['status'] ?? '')));
+        $showActions = in_array($quotationStatus, self::CUSTOMER_ALLOWED_RESPONSE_STATUSES, true);
+
+        $pdfHtml = $this->buildQuotationPdfHtml($quotation, $projects, [
+            'acceptUrl' => $showActions ? $acceptUrl : '',
+            'rejectUrl' => $showActions ? $rejectUrl : '',
+            'publicToken' => $plainToken,
+        ]);
 
         try {
             $mpdf = new Mpdf([
@@ -1360,26 +1370,30 @@ class QuotationController extends BaseApiController
      * @param array<string, mixed> $quotation
      * @param array<int, array<string, mixed>> $projects
      */
-    private function buildQuotationPdfHtml(array $quotation, array $projects): string
+    private function buildQuotationPdfHtml(array $quotation, array $projects, array $options = []): string
     {
         $quotationId = (int) ($quotation['id'] ?? 0);
         $assignment = $quotationId > 0 ? model(QuotationContractModel::class)->findByQuotationId($quotationId) : null;
         $contractName = null;
-        $contractTemplateName = null;
 
         if (is_array($assignment)) {
             $contract = (new ContractModel())->findDetailed((int) ($assignment['contract_id'] ?? 0));
             if (is_array($contract)) {
                 $contractName = $this->normalizeNullableText($contract['contract_name'] ?? null);
-                $contractTemplateName = $this->normalizeNullableText($contract['template_name'] ?? null);
             }
         }
 
+        $acceptUrl = trim((string) ($options['acceptUrl'] ?? ''));
+        $rejectUrl = trim((string) ($options['rejectUrl'] ?? ''));
+        $publicToken = trim((string) ($options['publicToken'] ?? ''));
+
         return '<html><head><meta charset="utf-8"><title>Quotation PDF</title><style>body, table, td, div, span, p, a, strong { font-family: Arial, Helvetica, sans-serif !important; }</style></head><body style="margin:0;padding:0;background:#ffffff;">'
             . $this->buildQuotationDocumentHtml($quotation, $projects, [
-                'showActions' => false,
+                'showActions' => true,
+                'acceptUrl' => $acceptUrl,
+                'rejectUrl' => $rejectUrl,
                 'contractName' => $contractName,
-                'contractTemplateName' => $contractTemplateName,
+                'publicToken' => $publicToken,
             ])
             . '</body></html>';
     }
@@ -1399,12 +1413,14 @@ class QuotationController extends BaseApiController
         $quoteDateLabel = $createdAt !== '' ? date('M d, Y', strtotime($createdAt) ?: time()) : date('M d, Y');
 
         $showActions = (bool) ($options['showActions'] ?? false);
+        $quotationStatus = trim((string) ($options['quotationStatus'] ?? ''));
+        $allowedToRespond = $quotationStatus === '' || in_array($quotationStatus, self::CUSTOMER_ALLOWED_RESPONSE_STATUSES, true);
+        $showActions = $showActions && $allowedToRespond;
         $acceptUrl = trim((string) ($options['acceptUrl'] ?? ''));
         $rejectUrl = trim((string) ($options['rejectUrl'] ?? ''));
         $contractUrl = trim((string) ($options['contractUrl'] ?? ''));
         $publicToken = trim((string) ($options['publicToken'] ?? ''));
         $contractName = trim((string) ($options['contractName'] ?? ''));
-        $contractTemplateName = trim((string) ($options['contractTemplateName'] ?? ''));
 
         if ($contractUrl === '' && $publicToken !== '') {
             $contractUrl = $this->buildPublicContractPreviewUrl($publicToken);
@@ -1609,13 +1625,12 @@ class QuotationController extends BaseApiController
         }
 
         $contractHtml = '';
-        if ($contractUrl !== '' || $contractName !== '' || $contractTemplateName !== '') {
+        if ($contractUrl !== '' || $contractName !== '') {
             $contractTitle = $contractName !== '' ? $contractName : 'Contract';
-            $contractMeta = $contractTemplateName !== '' ? 'Template: ' . $contractTemplateName : 'Open contract preview and sign digitally.';
 
             $contractHtml .= '<div style="margin:28px 0 0 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">';
             $contractHtml .= '<div style="font-size:16px;font-weight:700;color:#111827;margin:0 0 6px 0;">' . esc($contractTitle) . '</div>';
-            $contractHtml .= '<div style="font-size:13px;color:#4b5563;margin:0 0 10px 0;">' . esc($contractMeta) . '</div>';
+            $contractHtml .= '<div style="font-size:13px;color:#4b5563;margin:0 0 10px 0;">Open contract preview and sign digitally.</div>';
             if ($contractUrl !== '') {
                 $contractHtml .= '<a href="' . esc($contractUrl) . '" style="display:inline-block;padding:9px 14px;background:#1f2937;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Open Contract Link</a>';
             }

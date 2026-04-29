@@ -1430,8 +1430,13 @@ class QuotationController extends BaseApiController
         $publicToken = trim((string) ($options['publicToken'] ?? ''));
         $contractName = trim((string) ($options['contractName'] ?? ''));
 
-        if ($contractUrl === '' && $publicToken !== '') {
-            $contractUrl = $this->buildPublicContractPreviewUrl($publicToken);
+        // Only build contract URL if the quotation has an associated contract
+        $quotationId = (int) ($quotation['id'] ?? 0);
+        if ($contractUrl === '' && $publicToken !== '' && $quotationId > 0) {
+            $assignment = model(QuotationContractModel::class)->findByQuotationId($quotationId);
+            if (is_array($assignment) && isset($assignment['contract_id']) && (int) $assignment['contract_id'] > 0) {
+                $contractUrl = $this->buildPublicContractPreviewUrl($publicToken);
+            }
         }
 
         $customer = is_array($quotation['customer'] ?? null) ? $quotation['customer'] : [];
@@ -1640,7 +1645,7 @@ class QuotationController extends BaseApiController
         }
 
         $contractHtml = '';
-        if ($contractUrl !== '' || $contractName !== '') {
+        if ($contractUrl !== '') {
             $contractTitle = $contractName !== '' ? $contractName : 'Contract';
 
             $contractHtml .= '<div style="margin:28px 0 0 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">';
@@ -1648,9 +1653,7 @@ class QuotationController extends BaseApiController
             $contractHtml .= '<div style="font-size:16px;font-weight:700;color:#111827;margin:0 0 6px 0;">' . esc($contractTitle) . '</div>';
             $contractHtml .= '<div style="font-size:13px;color:#4b5563;margin:0 0 10px 0;">Open contract preview and sign digitally.</div>';
             $contractHtml .= '</td><td align="right" valign="middle" style="padding-left:16px;white-space:nowrap;">';
-            if ($contractUrl !== '') {
-                $contractHtml .= '<a href="' . esc($contractUrl) . '" style="display:inline-block;padding:9px 14px;background:#1f2937;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Open Contract Link</a>';
-            }
+            $contractHtml .= '<a href="' . esc($contractUrl) . '" style="display:inline-block;padding:9px 14px;background:#1f2937;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Open Contract Link</a>';
             $contractHtml .= '</td></tr></table></div>';
         }
 
@@ -1854,9 +1857,9 @@ class QuotationController extends BaseApiController
 
     private function getLogoDataUri(): ?string
     {
-        $logoPath = FCPATH . 'assets/images/white-logo.png';
+        $logoPath = getenv('app.FrontendUrl') . 'assets/images/white-logo.png';
         if (!is_file($logoPath)) {
-            $logoPath = FCPATH . 'assets/images/logo.png';
+            $logoPath = getenv('app.FrontendUrl') . 'assets/images/logo.png';
         }
 
         if (!is_file($logoPath)) {

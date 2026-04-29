@@ -716,15 +716,8 @@ class ProjectIntakeController extends BaseApiController
             $projectCategory = (string) ($project['category'] ?? 'N/A');
             $projectServices = $this->normalizeStringList($project['services'] ?? []);
             $scope = (string) ($project['scope'] ?? '');
-            $estimateType = (string) ($project['estimate_type'] ?? '');
             $plansUrl = (string) ($project['plans_url'] ?? '');
             $zipCode = (string) ($project['zip_code'] ?? '');
-            $deadline = (string) ($project['deadline'] ?? '');
-            $deliveryDate = (string) ($project['delivery_date'] ?? '');
-            $deadlineDate = (string) ($project['deadline_date'] ?? '');
-            $estimatedAmount = (string) ($project['estimated_amount'] ?? '');
-            $paymentType = (string) ($project['payment_type'] ?? 'fixed_rate');
-            $hourlyHours = (string) ($project['hourly_hours'] ?? '');
 
             // Project card
             $contentParts[] = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;border-collapse:collapse;">';
@@ -742,13 +735,10 @@ class ProjectIntakeController extends BaseApiController
             }
 
             // Project Details
-            if ($scope !== '' || $estimateType !== '' || $plansUrl !== '' || $zipCode !== '' || $deadline !== '' || $deliveryDate !== '' || $deadlineDate !== '') {
+            if ($scope !== '' || $plansUrl !== '' || $zipCode !== '') {
                 $contentParts[] = '<p style="margin:12px 0 8px 0;"><strong style="color:#0f172a;">Project Details</strong></p>';
                 if ($scope !== '') {
                     $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Scope:</strong> ' . esc($scope) . '</p>';
-                }
-                if ($estimateType !== '') {
-                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Estimate Type:</strong> ' . esc($estimateType) . '</p>';
                 }
                 if ($plansUrl !== '') {
                     $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Plans URL:</strong> <a href="' . esc($plansUrl) . '" style="color:#0f172a;text-decoration:none;">' . esc($plansUrl) . '</a></p>';
@@ -756,26 +746,8 @@ class ProjectIntakeController extends BaseApiController
                 if ($zipCode !== '') {
                     $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Zip Code:</strong> ' . esc($zipCode) . '</p>';
                 }
-                if ($deadline !== '') {
-                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Bid Deadline:</strong> ' . esc($deadline) . '</p>';
-                }
-                if ($deliveryDate !== '') {
-                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Delivery Date:</strong> ' . esc($deliveryDate) . '</p>';
-                }
-                if ($deadlineDate !== '') {
-                    $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Deadline Date:</strong> ' . esc($deadlineDate) . '</p>';
-                }
             }
 
-            // Billing Information
-            $contentParts[] = '<p style="margin:12px 0 8px 0;"><strong style="color:#0f172a;">Billing Information</strong></p>';
-            $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Payment Type:</strong> ' . esc($paymentType === 'hourly' ? 'Hourly' : 'Fixed Rate') . '</p>';
-            if ($estimatedAmount !== '' && $estimatedAmount !== '0.00') {
-                $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Estimated Amount:</strong> $' . esc($estimatedAmount) . '</p>';
-            }
-            if ($paymentType === 'hourly' && $hourlyHours !== '' && $hourlyHours !== '0.00') {
-                $contentParts[] = '<p style="margin:4px 0;font-size:14px;"><strong>Hours:</strong> ' . esc($hourlyHours) . '</p>';
-            }
 
             // Project files if any
             $projectIndex = (int) ($project['request_project_index'] ?? 0);
@@ -806,28 +778,19 @@ class ProjectIntakeController extends BaseApiController
             $contentParts[] = '</table>';
         }
 
-        // Square Status Summary
-        $squareStatuses = array_column($squareResults, 'status');
-        $deferredCount = count(array_filter($squareStatuses, static fn($s) => $s === 'deferred'));
-
-        $contentParts[] = '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:20px 0;border-collapse:collapse;">';
-        $contentParts[] = '<tr><td style="padding:12px;background:#f8fafc;border-left:3px solid #0f172a;"><strong style="color:#0f172a;">Square Integration Status</strong></td></tr>';
-        $contentParts[] = '<tr><td style="padding:12px;">';
-        if ($deferredCount > 0) {
-            $contentParts[] = '<p style="margin:0;"><strong>Deferred:</strong> <span style="background:#e0f2fe;padding:4px 8px;border-radius:4px;color:#075985;">' . esc((string) $deferredCount) . ' project(s) awaiting admin quotation/invoice action</span></p>';
-        }
         $contentParts[] = '</td></tr>';
         $contentParts[] = '</table>';
 
         $emailQueue = service('emailQueue');
         $subject = 'New Quotation Request - ' . ($requestNumber !== '' ? $requestNumber : '#' . $requestId);
+        $frontendUrl = trim((string) getenv('app.FrontendURL'));
         $body = $emailQueue->renderTemplate([
             'subject' => $subject,
             'recipientName' => 'Admin',
             'headline' => 'New Quotation Request Received',
             'contentHtml' => implode('', $contentParts),
             'actionText' => 'Review in Dashboard',
-            'actionUrl' => base_url('dashboard/quotation-requests/' . $requestId),
+            'actionUrl' => $frontendUrl . 'requests/' . $requestId,
         ]);
 
         queue_email_job($to, $subject, $body, [

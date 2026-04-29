@@ -31,8 +31,8 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
 
     // Public project intake routes
     $routes->get('projects/files/(:segment)', 'ProjectIntakeController::downloadFile/$1');
-    $routes->get('get_quotation_public_details(:segment)', 'QuotationController::publicShow/$1');
-    $routes->post('customer_responded(:segment)', 'QuotationController::publicRespond/$1');
+    $routes->get('get_quotation_public_details/(:segment)', 'QuotationController::publicShow/$1');
+    $routes->post('customer_responded/(:segment)', 'QuotationController::publicRespond/$1');
     $routes->get('quotations_contract', 'QuotationContractController::publicShow');
     $routes->get('public_quotations_contract/(:segment)', 'QuotationContractController::publicShow/$1');
     $routes->post('quotations_contract_signature/contract', 'QuotationContractController::publicSubmit');
@@ -44,15 +44,13 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
     $routes->get('services', 'ServiceController::index');
     $routes->get('services/(:num)', 'ServiceController::show/$1');
     $routes->get('services/category/(:num)', 'ServiceController::byCategory/$1');
-
-    // Admin-only category routes
     $routes->group('', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->group('', ['filter' => 'roleAccess:admin'], function ($routes) {
             $routes->post('categories', 'CategoryController::store');
             $routes->post('categories/(:num)', 'CategoryController::update/$1');
             $routes->patch('categories/(:num)', 'CategoryController::update/$1');
             $routes->delete('categories/(:num)', 'CategoryController::delete/$1');
-
+            
             $routes->post('services', 'ServiceController::store');
             $routes->post('services/(:num)', 'ServiceController::update/$1');
             $routes->patch('services/(:num)', 'ServiceController::update/$1');

@@ -838,7 +838,7 @@ class ProjectIntakeController extends BaseApiController
     private function queueCustomerSubmittedNotification(
         string $email,
         string $name,
-        ?int $requestNumber
+        ?string $requestNumber
     ): void {
         $to = trim($email);
         if ($to === '') {

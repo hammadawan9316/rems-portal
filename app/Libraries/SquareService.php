@@ -297,7 +297,7 @@ class SquareService
                 ],
                 'delivery_method' => 'EMAIL',
                 'title' => 'Quotation ' . $quotationTitle,
-                'description' => 'Draft invoice linked to quotation #' . $quotationId,
+                'description' => 'Draft invoice linked to quotation #' . $quotationId . ' | quotation_id:' . $quotationId,
                 'accepted_payment_methods' => [
                     'card' => true,
                     'square_gift_card' => false,
@@ -407,6 +407,7 @@ class SquareService
 
         return [
             'invoice' => $invoice,
+            'public_url' => $this->extractInvoicePublicUrl($invoice),
             'payment_status' => $this->detectInvoicePaymentStatus($invoice),
         ];
     }
@@ -468,6 +469,7 @@ class SquareService
 
         $result = [
             'invoice' => $invoice,
+            'public_url' => $this->extractInvoicePublicUrl($invoice),
             'analysis' => $analysis,
             'payment_status' => $this->detectInvoicePaymentStatus($invoice),
         ];
@@ -664,6 +666,7 @@ class SquareService
 
         return [
             'invoice_id' => $invoice['id'] ?? null,
+            'public_url' => $this->extractInvoicePublicUrl($invoice),
             'invoice_number' => $invoice['invoice_number'] ?? null,
             'status' => $invoice['status'] ?? null,
             'title' => $invoice['title'] ?? null,
@@ -810,6 +813,33 @@ class SquareService
         }
 
         return 0.0;
+    }
+
+    /**
+     * Extract or construct public URL from Square invoice object.
+     * @param array<string,mixed> $invoice
+     */
+    private function extractInvoicePublicUrl(array $invoice): ?string
+    {
+        // First try to get the public_url from the invoice object
+        $publicUrl = trim((string) ($invoice['public_url'] ?? ''));
+        if ($publicUrl !== '') {
+            return $publicUrl;
+        }
+
+        // If not present, construct the URL based on environment
+        $invoiceId = trim((string) ($invoice['id'] ?? ''));
+        if ($invoiceId === '') {
+            return null;
+        }
+
+        // Determine if sandbox or production based on baseUrl
+        $baseUrl = rtrim($this->config->baseUrl, '/');
+        if (strpos($baseUrl, 'sandbox') !== false) {
+            return 'https://squareupsandbox.com/i/' . $invoiceId;
+        }
+
+        return 'https://square.com/i/' . $invoiceId;
     }
 
     /**

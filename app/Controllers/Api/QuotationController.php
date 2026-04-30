@@ -573,6 +573,85 @@ class QuotationController extends BaseApiController
         ], 'Public quotation response email queued successfully.');
     }
 
+    public function sendFollowUpNotification(int $id)
+    {
+        $quotationModel = new QuotationModel();
+        $customerModel = new CustomerModel();
+        $businessProfileModel = new BusinessProfileModel();
+
+        $quotation = $quotationModel->find($id);
+        if (!is_array($quotation)) {
+            return $this->res->notFound('Quotation not found');
+        }
+
+        $currentStatus = strtolower(trim((string) ($quotation['status'] ?? '')));
+        $responseAt = trim((string) ($quotation['response_at'] ?? ''));
+        if ($responseAt !== '' || in_array($currentStatus, [self::STATUS_ACCEPTED, self::STATUS_REJECTED, self::STATUS_COMPLETED, self::STATUS_SQUARE_FAILED], true)) {
+            return $this->res->badRequest('Follow-up notification can only be sent for quotations that have not been responded to.');
+        }
+
+        $customerId = (int) ($quotation['customer_id'] ?? 0);
+        $customer = $customerModel->find($customerId);
+        if (!is_array($customer)) {
+            return $this->res->notFound('Customer not found.');
+        }
+
+        $customerEmail = trim((string) ($customer['email'] ?? ''));
+        if ($customerEmail === '') {
+            return $this->res->badRequest('Customer does not have a valid email address.');
+        }
+
+        $businessProfile = $businessProfileModel->findActive();
+        $fallbackText = is_array($businessProfile) ? (string) ($businessProfile['followup_notification_text'] ?? '') : '';
+        $requestData = $this->getRequestData(false);
+        $followUpText = $this->resolveFollowUpNotificationText($requestData, $fallbackText);
+
+        $status = strtolower(trim((string) ($quotation['status'] ?? '')));
+        if ($status !== self::STATUS_PENDING) {
+            $updated = $quotationModel->update($id, [
+                'status' => self::STATUS_PENDING,
+            ]);
+
+            if (!$updated) {
+                return $this->res->serverError('Could not update quotation status to pending before sending follow-up notification.');
+            }
+        }
+
+        $tokenResult = $quotationModel->issuePublicResponseToken($id, self::PUBLIC_TOKEN_EXPIRY_DAYS);
+        if (!is_array($tokenResult)) {
+            return $this->res->serverError('Could not generate quotation response link.');
+        }
+
+        $plainToken = (string) ($tokenResult['token'] ?? '');
+        $quotationPreviewUrl = $this->buildPublicQuotationPreviewUrl($plainToken);
+        $quoteNumber = trim((string) ($quotation['quote_number'] ?? ''));
+        $recipientName = trim((string) ($customer['name'] ?? ''));
+        $recipientName = $recipientName !== '' ? $recipientName : 'Customer';
+        $subject = 'Quotation Follow-Up' . ($quoteNumber !== '' ? ' - ' . $quoteNumber : '');
+
+        $emailQueue = service('emailQueue');
+        $body = $emailQueue->renderTemplate([
+            'subject' => $subject,
+            'recipientName' => $recipientName,
+            'headline' => 'Follow-Up on Your Quotation',
+            'contentHtml' => $this->buildFollowUpEmailContent($quotation, $followUpText),
+            'actionText' => 'Open Quotation Preview',
+            'actionUrl' => $quotationPreviewUrl,
+        ]);
+
+        $queueId = queue_email_job($customerEmail, $subject, $body, [
+            'mail_type' => 'html',
+        ]);
+
+        return $this->res->ok([
+            'quotation_id' => $id,
+            'queue_job_id' => $queueId,
+            'quotation_preview_url' => $quotationPreviewUrl,
+            'customer_email_masked' => $this->maskEmail($customerEmail),
+            'followup_text' => $followUpText,
+        ], 'Follow-up notification queued successfully.');
+    }
+
     public function publicShow(string $token)
     {
         $quotationModel = new QuotationModel();
@@ -949,6 +1028,19 @@ class QuotationController extends BaseApiController
         $result = $this->paginateFormattedQuotations(null, $params['search'], $params['perPage'], $params['offset'], self::STATUS_REQUESTED);
 
         return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Requested quotations retrieved successfully');
+    }
+
+    public function followUpQuotations()
+    {
+        $params = $this->getListQueryParams();
+        $businessProfile = (new BusinessProfileModel())->findActive();
+        $followupDays = (int) ($businessProfile['followup_notification_days'] ?? 7);
+
+        $quotationModel = new QuotationModel();
+        $result = $quotationModel->paginateFollowUpQuotations($followupDays, $params['perPage'], $params['offset']);
+        $result['items'] = array_map(fn(array $quotation): array => $this->formatQuotationForResponse($quotation), $result['items']);
+
+        return $this->res->paginated($result['items'], $result['total'], $params['page'], $params['perPage'], 'Follow-up quotations retrieved successfully');
     }
 
     public function show(int $id)
@@ -2328,6 +2420,48 @@ class QuotationController extends BaseApiController
         return $this->buildFrontendUrl('/quotation-preview', [
             'token' => $token,
         ]);
+    }
+
+    private function resolveFollowUpNotificationText(array $data, string $fallbackText): string
+    {
+        $text = trim((string) ($data['followup_notification_text'] ?? ($data['follow_up_notification_text'] ?? ($data['followupNotificationText'] ?? ($data['followupText'] ?? ($data['message'] ?? ($data['text'] ?? '')))))));
+
+        if ($text !== '') {
+            return $text;
+        }
+
+        $fallbackText = trim($fallbackText);
+        if ($fallbackText !== '') {
+            return $fallbackText;
+        }
+
+        return 'Please review your quotation and let us know if you would like to move forward.';
+    }
+
+    /**
+     * @param array<string, mixed> $quotation
+     */
+    private function buildFollowUpEmailContent(array $quotation, string $followUpText): string
+    {
+        $quoteNumber = trim((string) ($quotation['quote_number'] ?? ''));
+        $description = trim((string) ($quotation['description'] ?? ''));
+        $status = trim((string) ($quotation['status'] ?? ''));
+
+        $html = '<div style="font-size:15px;line-height:1.8;color:#334155;">' . nl2br(esc($followUpText)) . '</div>';
+        $html .= '<div style="margin-top:18px;padding:14px 16px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">';
+        $html .= '<div style="font-size:13px;color:#64748b;margin-bottom:6px;">Quotation Details</div>';
+        if ($quoteNumber !== '') {
+            $html .= '<div style="font-size:15px;font-weight:700;color:#0f172a;">' . esc($quoteNumber) . '</div>';
+        }
+        if ($description !== '') {
+            $html .= '<div style="font-size:14px;color:#475569;margin-top:6px;">' . esc($description) . '</div>';
+        }
+        if ($status !== '') {
+            $html .= '<div style="font-size:12px;color:#64748b;margin-top:6px;text-transform:uppercase;letter-spacing:0.04em;">Status: ' . esc($status) . '</div>';
+        }
+        $html .= '</div>';
+
+        return $html;
     }
 
     private function buildPublicQuotationActionUrl(string $token, string $action): string

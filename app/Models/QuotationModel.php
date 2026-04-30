@@ -232,6 +232,44 @@ class QuotationModel extends Model
     }
 
     /**
+     * @return array{items:array<int, array<string, mixed>>, total:int}
+     */
+    public function paginateFollowUpQuotations(int $followupDays, int $perPage = 20, int $offset = 0): array
+    {
+        $followupDays = max(0, $followupDays);
+        $cutoff = date('Y-m-d H:i:s', strtotime('-' . $followupDays . ' days'));
+
+        $countBuilder = $this->builder()
+            ->select('COUNT(DISTINCT quotations.id) AS total', false)
+            ->join('customers', 'customers.id = quotations.customer_id', 'left')
+            ->where('quotations.public_response_token_issued_at IS NOT NULL', null, false)
+            ->where('quotations.response_at IS NULL', null, false)
+            ->where('quotations.public_response_token_issued_at <=', $cutoff);
+
+        $totalRow = $countBuilder->get()->getRowArray();
+        $total = (int) ($totalRow['total'] ?? 0);
+
+        $itemsBuilder = $this->builder()
+            ->select('quotations.*, customers.id AS customer_ref_id, customers.name AS customer_name, customers.email AS customer_email, customers.phone AS customer_phone, customers.company AS customer_company')
+            ->join('customers', 'customers.id = quotations.customer_id', 'left')
+            ->where('quotations.public_response_token_issued_at IS NOT NULL', null, false)
+            ->where('quotations.response_at IS NULL', null, false)
+            ->where('quotations.public_response_token_issued_at <=', $cutoff);
+
+        $quotations = $itemsBuilder
+            ->orderBy('quotations.public_response_token_issued_at', 'ASC')
+            ->orderBy('quotations.id', 'ASC')
+            ->limit($perPage, $offset)
+            ->get()
+            ->getResultArray();
+
+        return [
+            'items' => $quotations,
+            'total' => $total,
+        ];
+    }
+
+    /**
      * @param array<int, array<string, mixed>> $quotations
      * @return array<int, array<string, mixed>>
      */

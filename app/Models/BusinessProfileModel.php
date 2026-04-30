@@ -19,6 +19,8 @@ class BusinessProfileModel extends Model
         'phone',
         'address',
         'website_url',
+        'followup_notification_days',
+        'followup_notification_text',
         'is_active',
     ];
 

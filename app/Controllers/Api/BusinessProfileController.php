@@ -218,6 +218,18 @@ class BusinessProfileController extends BaseApiController
             }
         }
 
+        $followupDaysProvided = array_key_exists('followup_notification_days', $data)
+            || array_key_exists('follow_up_notification_days', $data)
+            || array_key_exists('followupNotificationDays', $data)
+            || array_key_exists('followupDays', $data);
+
+        if (!$isPartial || $followupDaysProvided) {
+            $followupDays = $this->normalizeFollowupDays($data['followup_notification_days'] ?? ($data['follow_up_notification_days'] ?? ($data['followupNotificationDays'] ?? ($data['followupDays'] ?? null))));
+            if ($followupDays === null) {
+                $errors['followup_notification_days'] = 'Follow-up notification days must be a valid non-negative integer.';
+            }
+        }
+
         return $errors;
     }
 
@@ -253,6 +265,17 @@ class BusinessProfileController extends BaseApiController
             $payload['website_url'] = trim((string) ($data['website_url'] ?? ($data['websiteUrl'] ?? '')));
         }
 
+        if (!$isPartial || array_key_exists('followup_notification_days', $data) || array_key_exists('follow_up_notification_days', $data) || array_key_exists('followupNotificationDays', $data) || array_key_exists('followupDays', $data)) {
+            $followupDays = $this->normalizeFollowupDays($data['followup_notification_days'] ?? ($data['follow_up_notification_days'] ?? ($data['followupNotificationDays'] ?? ($data['followupDays'] ?? null))));
+            if ($followupDays !== null) {
+                $payload['followup_notification_days'] = $followupDays;
+            }
+        }
+
+        if (!$isPartial || array_key_exists('followup_notification_text', $data) || array_key_exists('follow_up_notification_text', $data) || array_key_exists('followupNotificationText', $data) || array_key_exists('followupText', $data) || array_key_exists('message', $data)) {
+            $payload['followup_notification_text'] = $this->normalizeFollowupText($data['followup_notification_text'] ?? ($data['follow_up_notification_text'] ?? ($data['followupNotificationText'] ?? ($data['followupText'] ?? ($data['message'] ?? null)))));
+        }
+
         if (!$isPartial || array_key_exists('is_active', $data) || array_key_exists('active', $data)) {
             $payload['is_active'] = $this->normalizeBool($data['is_active'] ?? ($data['active'] ?? true));
         }
@@ -276,5 +299,31 @@ class BusinessProfileController extends BaseApiController
 
         $normalized = strtolower(trim((string) $value));
         return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+    }
+
+    private function normalizeFollowupDays(mixed $value): ?int
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_string($value) && trim($value) === '') {
+            return null;
+        }
+
+        if (!is_numeric($value)) {
+            return null;
+        }
+
+        $days = (int) $value;
+
+        return $days < 0 ? null : $days;
+    }
+
+    private function normalizeFollowupText(mixed $value): ?string
+    {
+        $text = trim((string) ($value ?? ''));
+
+        return $text === '' ? null : $text;
     }
 }

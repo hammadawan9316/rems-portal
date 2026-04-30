@@ -70,20 +70,7 @@ class InvoiceController extends BaseApiController
         try {
             $result = $square->listInvoices($params['perPage'], $cursor !== '' ? $cursor : null, $paymentStatus);
             $invoices = is_array($result['invoices'] ?? null) ? $result['invoices'] : [];
-            $invoiceIds = [];
-
-            foreach ($invoices as $invoice) {
-                if (!is_array($invoice)) {
-                    continue;
-                }
-
-                $invoiceId = trim((string) ($invoice['id'] ?? ''));
-                if ($invoiceId !== '') {
-                    $invoiceIds[] = $invoiceId;
-                }
-            }
-
-            $invoiceToQuotation = $this->mapSquareInvoicesToQuotations($invoiceIds);
+            $invoiceToQuotation = $this->mapSquareInvoicesToQuotations($invoices);
             $items = [];
 
             foreach ($invoices as $invoice) {
@@ -134,7 +121,9 @@ class InvoiceController extends BaseApiController
 
         try {
             $detail = $square->getInvoiceSummary($normalizedInvoiceId);
-            $mapped = $this->mapSquareInvoicesToQuotations([$normalizedInvoiceId]);
+            $mapped = $this->mapSquareInvoicesToQuotations([
+                is_array($detail['invoice'] ?? null) ? $detail['invoice'] : ['id' => $normalizedInvoiceId],
+            ]);
             $detail['linked_quotation'] = $mapped[$normalizedInvoiceId] ?? null;
 
             return $this->res->ok($detail, 'Square invoice retrieved successfully.');
@@ -178,41 +167,178 @@ class InvoiceController extends BaseApiController
     }
 
     /**
-     * @param array<int, string> $invoiceIds
-     * @return array<string, array{id:int,quote_number:?string,status:?string,square_invoice_id:string}>
+     * @param array<int, array<string,mixed>> $invoices
+     * @return array<string, array{id:int,quote_number:?string,status:?string,square_invoice_id:?string,square_order_id:?string,project_id:?int}>
      */
-    private function mapSquareInvoicesToQuotations(array $invoiceIds): array
+    private function mapSquareInvoicesToQuotations(array $invoices): array
     {
-        $cleanInvoiceIds = array_values(array_unique(array_filter(array_map(static fn (string $id): string => trim($id), $invoiceIds), static fn (string $id): bool => $id !== '')));
-        if ($cleanInvoiceIds === []) {
+        $cleanInvoices = array_values(array_filter($invoices, static fn ($invoice): bool => is_array($invoice)));
+        if ($cleanInvoices === []) {
             return [];
         }
 
-        $rows = model(QuotationModel::class)
-            ->select('id, quote_number, status, square_invoice_id')
-            ->whereIn('square_invoice_id', $cleanInvoiceIds)
+        $invoiceIds = [];
+        $orderIds = [];
+        foreach ($cleanInvoices as $invoice) {
+            $invoiceId = trim((string) ($invoice['id'] ?? ''));
+            if ($invoiceId !== '') {
+                $invoiceIds[] = $invoiceId;
+            }
+
+            $orderId = trim((string) ($invoice['order_id'] ?? ''));
+            if ($orderId !== '') {
+                $orderIds[] = $orderId;
+            }
+        }
+
+        $invoiceIds = array_values(array_unique($invoiceIds));
+        $orderIds = array_values(array_unique($orderIds));
+
+        if ($invoiceIds === [] && $orderIds === []) {
+            return [];
+        }
+
+        $quotationBuilder = model(QuotationModel::class)
+            ->select('id, quote_number, status, square_invoice_id, square_order_id');
+
+        if ($invoiceIds !== [] && $orderIds !== []) {
+            $quotationBuilder
+                ->groupStart()
+                ->whereIn('square_invoice_id', $invoiceIds)
+                ->orWhereIn('square_order_id', $orderIds)
+                ->groupEnd();
+        } elseif ($invoiceIds !== []) {
+            $quotationBuilder->whereIn('square_invoice_id', $invoiceIds);
+        } else {
+            $quotationBuilder->whereIn('square_order_id', $orderIds);
+        }
+
+        $rows = $quotationBuilder
             ->findAll();
 
-        $mapped = [];
+        $mappedByInvoiceId = [];
+        $mappedByOrderId = [];
         foreach ($rows as $row) {
             if (!is_array($row)) {
                 continue;
             }
 
+            $summary = [
+                'id' => (int) ($row['id'] ?? 0),
+                'quote_number' => $this->normalizeNullableText($row['quote_number'] ?? null),
+                'status' => $this->normalizeNullableText($row['status'] ?? null),
+                'square_invoice_id' => $this->normalizeNullableText($row['square_invoice_id'] ?? null),
+                'square_order_id' => $this->normalizeNullableText($row['square_order_id'] ?? null),
+                'project_id' => null,
+            ];
+
             $invoiceId = trim((string) ($row['square_invoice_id'] ?? ''));
+            if ($invoiceId !== '' && !isset($mappedByInvoiceId[$invoiceId])) {
+                $mappedByInvoiceId[$invoiceId] = $summary;
+            }
+
+            $orderId = trim((string) ($row['square_order_id'] ?? ''));
+            if ($orderId !== '' && !isset($mappedByOrderId[$orderId])) {
+                $mappedByOrderId[$orderId] = $summary;
+            }
+        }
+
+        $mapped = [];
+        foreach ($cleanInvoices as $invoice) {
+            $invoiceId = trim((string) ($invoice['id'] ?? ''));
             if ($invoiceId === '' || isset($mapped[$invoiceId])) {
                 continue;
             }
 
-            $mapped[$invoiceId] = [
-                'id' => (int) ($row['id'] ?? 0),
-                'quote_number' => $this->normalizeNullableText($row['quote_number'] ?? null),
-                'status' => $this->normalizeNullableText($row['status'] ?? null),
-                'square_invoice_id' => $invoiceId,
-            ];
+            $orderId = trim((string) ($invoice['order_id'] ?? ''));
+
+            if ($invoiceId !== '' && isset($mappedByInvoiceId[$invoiceId])) {
+                $mapped[$invoiceId] = $mappedByInvoiceId[$invoiceId];
+                continue;
+            }
+
+            if ($orderId !== '' && isset($mappedByOrderId[$orderId])) {
+                $mapped[$invoiceId] = $mappedByOrderId[$orderId];
+            }
+        }
+
+        // Fallback: extract quotation ID embedded in invoice text and map directly.
+        $missingByText = [];
+        foreach ($cleanInvoices as $invoice) {
+            $invoiceId = trim((string) ($invoice['id'] ?? ''));
+            if ($invoiceId === '' || isset($mapped[$invoiceId])) {
+                continue;
+            }
+
+            $quotationId = $this->extractQuotationIdFromInvoice($invoice);
+            if ($quotationId > 0) {
+                $missingByText[$invoiceId] = $quotationId;
+            }
+        }
+
+        if ($missingByText !== []) {
+            $quotationIds = array_values(array_unique(array_values($missingByText)));
+            $fallbackRows = model(QuotationModel::class)
+                ->select('id, quote_number, status, square_invoice_id, square_order_id')
+                ->whereIn('id', $quotationIds)
+                ->findAll();
+
+            $byQuotationId = [];
+            foreach ($fallbackRows as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+
+                $quotationId = (int) ($row['id'] ?? 0);
+                if ($quotationId < 1) {
+                    continue;
+                }
+
+                $byQuotationId[$quotationId] = [
+                    'id' => $quotationId,
+                    'quote_number' => $this->normalizeNullableText($row['quote_number'] ?? null),
+                    'status' => $this->normalizeNullableText($row['status'] ?? null),
+                    'square_invoice_id' => $this->normalizeNullableText($row['square_invoice_id'] ?? null),
+                    'square_order_id' => $this->normalizeNullableText($row['square_order_id'] ?? null),
+                    'project_id' => null,
+                ];
+            }
+
+            foreach ($missingByText as $invoiceId => $quotationId) {
+                if (!isset($mapped[$invoiceId]) && isset($byQuotationId[$quotationId])) {
+                    $mapped[$invoiceId] = $byQuotationId[$quotationId];
+                }
+            }
         }
 
         return $mapped;
+    }
+
+    /**
+     * @param array<string,mixed> $invoice
+     */
+    private function extractQuotationIdFromInvoice(array $invoice): int
+    {
+        $candidates = [
+            trim((string) ($invoice['description'] ?? '')),
+            trim((string) ($invoice['title'] ?? '')),
+        ];
+
+        foreach ($candidates as $text) {
+            if ($text === '') {
+                continue;
+            }
+
+            if (preg_match('/quotation_id\s*[:=]\s*(\d+)/i', $text, $match) === 1) {
+                return (int) ($match[1] ?? 0);
+            }
+
+            if (preg_match('/quotation\s*#\s*(\d+)/i', $text, $match) === 1) {
+                return (int) ($match[1] ?? 0);
+            }
+        }
+
+        return 0;
     }
 
     private function parseBooleanParam(mixed $value, bool $default): bool

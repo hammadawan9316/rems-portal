@@ -511,7 +511,6 @@ class AuthenticationService
                 ];
             }, $user['roles'] ?? []),
             'business_profile' => $activeBusinessProfile,
-            'active_business_profile' => $activeBusinessProfile,
         ];
     }
 

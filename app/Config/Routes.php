@@ -88,11 +88,13 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
             $routes->post('quotations_contract_signatures/(:num)', 'QuotationContractController::updateSignatures/$1');
             $routes->get('quotations', 'QuotationController::index');
             $routes->get('quotations/requested', 'QuotationController::requested');
+            $routes->get('quotations/followups', 'QuotationController::followUpQuotations');
             $routes->post('quotations', 'QuotationController::store');
             $routes->post('quotations/submit', 'QuotationController::submit');
             $routes->post('quotations/(:num)', 'QuotationController::update/$1');
             $routes->patch('quotations/(:num)', 'QuotationController::update/$1');
             $routes->post('send_quotation_to_customer/(:num)', 'QuotationController::sendPublicResponseLink/$1');
+            $routes->post('send_followup_notification/(:num)', 'QuotationController::sendFollowUpNotification/$1');
            
             $routes->get('download_quotations_pdf/(:num)', 'QuotationController::downloadPdf/$1');
             $routes->get('quotations/(:num)', 'QuotationController::show/$1');

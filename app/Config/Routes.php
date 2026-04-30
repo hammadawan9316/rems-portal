@@ -92,10 +92,7 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
             $routes->post('quotations/(:num)', 'QuotationController::update/$1');
             $routes->patch('quotations/(:num)', 'QuotationController::update/$1');
             $routes->post('send_quotation_to_customer/(:num)', 'QuotationController::sendPublicResponseLink/$1');
-            $routes->post('create_square_invoice_from_quotation/(:num)', 'QuotationController::createSquareInvoice/$1');
-            $routes->get('square_invoices', 'QuotationController::squareInvoices');
-            $routes->get('square_invoices/(:segment)', 'QuotationController::squareInvoice/$1');
-            $routes->get('quotations/(:num)/square_invoice', 'QuotationController::squareInvoiceByQuotation/$1');
+           
             $routes->get('download_quotations_pdf/(:num)', 'QuotationController::downloadPdf/$1');
             $routes->get('quotations/(:num)', 'QuotationController::show/$1');
             $routes->get('quotation_requests', 'QuotationRequestController::index');
@@ -103,6 +100,12 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
             $routes->post('create_quotation_from_request/(:num)', 'QuotationRequestController::createQuotation/$1');
             $routes->get('customers/(:num)/quotations', 'QuotationController::byCustomer/$1');
             $routes->get('customers/(:num)/quotations/requested', 'QuotationController::requestedByCustomer/$1');
+
+            // invoice routes
+            $routes->post('create_square_invoice_from_quotation/(:num)', 'InvoiceController::createSquareInvoice/$1');
+            $routes->get('square_invoices', 'InvoiceController::squareInvoices');
+            $routes->get('square_invoices/(:segment)', 'InvoiceController::squareInvoice/$1');
+            $routes->get('quotations_square_invoice/(:num)', 'InvoiceController::squareInvoiceByQuotation/$1');
         });
     });
 

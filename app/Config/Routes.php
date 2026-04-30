@@ -25,6 +25,7 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
     $routes->group('auth', ['filter' => 'jwtAuth'], function ($routes) {
         $routes->post('refresh', 'AuthenticationController::refresh');
         $routes->post('change-password', 'AuthenticationController::changePassword');
+        $routes->post('profile', 'AuthenticationController::updateProfile');
         $routes->get('me', 'AuthenticationController::getCurrentUser');
         $routes->post('logout', 'AuthenticationController::logout');
     });

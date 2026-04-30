@@ -164,6 +164,108 @@ class AuthenticationService
     }
 
     /**
+     * @return array{success: bool, message: string, user?: array, errors?: array}
+     */
+    public function updateProfile(int $userId, array $data): array
+    {
+        $user = $this->userModel->find($userId);
+        if (!is_array($user)) {
+            return [
+                'success' => false,
+                'message' => 'User not found',
+            ];
+        }
+
+        $updateData = [];
+        $errors = [];
+
+        if (array_key_exists('name', $data)) {
+            $name = trim((string) $data['name']);
+            if ($name === '' || strlen($name) < 2) {
+                $errors['name'] = 'Name must be at least 2 characters';
+            } elseif (strlen($name) > 160) {
+                $errors['name'] = 'Name must not exceed 160 characters';
+            } else {
+                $updateData['name'] = $name;
+            }
+        }
+
+        if (array_key_exists('phone', $data)) {
+            $phone = trim((string) $data['phone']);
+            if ($phone !== '' && strlen($phone) > 20) {
+                $errors['phone'] = 'Phone must not exceed 20 characters';
+            } else {
+                $updateData['phone'] = $phone === '' ? null : $phone;
+            }
+        }
+
+        if (array_key_exists('profile_image', $data)) {
+            $profileImage = trim((string) $data['profile_image']);
+            if ($profileImage !== '' && strlen($profileImage) > 255) {
+                $errors['profile_image'] = 'Profile image path must not exceed 255 characters';
+            } else {
+                $updateData['profile_image'] = $profileImage === '' ? null : $profileImage;
+            }
+        }
+
+        if ($errors !== []) {
+            return [
+                'success' => false,
+                'message' => 'Validation error',
+                'errors' => $errors,
+            ];
+        }
+
+        if ($updateData === []) {
+            return [
+                'success' => false,
+                'message' => 'No profile fields were provided for update',
+            ];
+        }
+
+        $updated = $this->userModel->update($userId, $updateData);
+        if (!$updated) {
+            return [
+                'success' => false,
+                'message' => 'Failed to update profile',
+            ];
+        }
+
+        $updatedUser = $this->userModel->getUserWithRoles($userId);
+        if (!is_array($updatedUser)) {
+            return [
+                'success' => false,
+                'message' => 'Profile updated but failed to load user',
+            ];
+        }
+
+        $customer = $this->customerModel
+            ->where('user_id', $userId)
+            ->first();
+        if (is_array($customer)) {
+            $customerId = (int) ($customer['id'] ?? 0);
+            if ($customerId > 0) {
+                $customerUpdate = [];
+                if (isset($updateData['name'])) {
+                    $customerUpdate['name'] = $updateData['name'];
+                }
+                if (array_key_exists('phone', $updateData)) {
+                    $customerUpdate['phone'] = (string) ($updateData['phone'] ?? '');
+                }
+                if ($customerUpdate !== []) {
+                    $this->customerModel->update($customerId, $customerUpdate);
+                }
+            }
+        }
+
+        return [
+            'success' => true,
+            'message' => 'Profile updated successfully',
+            'user' => $this->formatUserResponse($updatedUser, $this->getActiveBusinessProfile()),
+        ];
+    }
+
+    /**
      * Request password reset
      *
      * @return array{success: bool, message: string}
@@ -396,6 +498,7 @@ class AuthenticationService
             'email' => $user['email'],
             'name' => $user['name'],
             'phone' => $user['phone'],
+            'profile_image' => $user['profile_image'] ?? null,
             'company' => $user['company'],
             'is_active' => $user['is_active'],
             'email_verified_at' => $user['email_verified_at'],

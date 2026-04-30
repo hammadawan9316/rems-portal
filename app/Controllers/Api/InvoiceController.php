@@ -57,9 +57,8 @@ class InvoiceController extends BaseApiController
             return $this->res->badRequest('Square integration is not configured.');
         }
 
-        $params = $this->getListQueryParams(20, 100);
-        $cursor = trim((string) ($this->request->getGet('cursor') ?? ''));
-        $includeDetails = $this->parseBooleanParam($this->request->getGet('include_details'), true);
+        $params = $this->getListQueryParams(10, 100);
+        $cursor = trim((string) ($this->request->getGet('next_cursor') ?? ''));
         $paymentStatusResult = $this->resolvePaymentStatusFilter($this->request->getGet('payment_status'));
         if (is_array($paymentStatusResult) && isset($paymentStatusResult['error'])) {
             return $this->res->badRequest('Invalid payment status filter.', [
@@ -99,19 +98,7 @@ class InvoiceController extends BaseApiController
                     'linked_quotation' => $invoiceToQuotation[$invoiceId] ?? null,
                 ];
 
-                if (!$includeDetails || $invoiceId === '') {
-                    $items[] = $base;
-                    continue;
-                }
-
-                try {
-                    $detail = $square->getInvoiceWithAnalysis($invoiceId);
-                    $detail['linked_quotation'] = $invoiceToQuotation[$invoiceId] ?? null;
-                    $items[] = $detail;
-                } catch (\Throwable $exception) {
-                    $base['detail_error'] = $exception->getMessage();
-                    $items[] = $base;
-                }
+                $items[] = $base;
             }
 
             return $this->res->ok([
@@ -123,7 +110,7 @@ class InvoiceController extends BaseApiController
                     'next_cursor' => $result['cursor'] ?? null,
                 ],
                 'meta' => [
-                    'include_details' => $includeDetails,
+                    'include_details' => false,
                     'payment_status_filter' => $paymentStatus,
                     'square_api_version' => $square->getApiVersion(),
                 ],
@@ -146,7 +133,7 @@ class InvoiceController extends BaseApiController
         }
 
         try {
-            $detail = $square->getInvoiceWithAnalysis($normalizedInvoiceId);
+            $detail = $square->getInvoiceSummary($normalizedInvoiceId);
             $mapped = $this->mapSquareInvoicesToQuotations([$normalizedInvoiceId]);
             $detail['linked_quotation'] = $mapped[$normalizedInvoiceId] ?? null;
 
@@ -176,7 +163,7 @@ class InvoiceController extends BaseApiController
         }
 
         try {
-            $detail = $square->getInvoiceWithAnalysis($invoiceId);
+            $detail = $square->getInvoiceSummary($invoiceId);
             $detail['linked_quotation'] = [
                 'id' => (int) ($quotation['id'] ?? 0),
                 'quote_number' => $this->normalizeNullableText($quotation['quote_number'] ?? null),

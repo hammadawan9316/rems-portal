@@ -209,6 +209,59 @@ class AuthenticationController extends BaseApiController
     }
 
     /**
+     * Update current authenticated user profile
+     * POST /api/auth/profile
+     */
+    public function updateProfile()
+    {
+        $userId = $this->getUserIdFromToken();
+        if ($userId === null) {
+            return $this->res->unauthorized('Authentication required');
+        }
+
+        $data = $this->getRequestData(false);
+        $payload = [];
+
+        if (array_key_exists('name', $data)) {
+            $payload['name'] = $data['name'];
+        }
+
+        if (array_key_exists('phone', $data)) {
+            $payload['phone'] = $data['phone'];
+        }
+
+        if (array_key_exists('profile_image', $data)) {
+            $payload['profile_image'] = $data['profile_image'];
+        }
+
+        $uploadedImage = $this->uploadProfileImage();
+        if (isset($uploadedImage['error'])) {
+            return $this->res->validation(['profile_image' => (string) $uploadedImage['error']]);
+        }
+
+        if (isset($uploadedImage['path'])) {
+            $payload['profile_image'] = $uploadedImage['path'];
+        }
+
+        if ($payload === []) {
+            return $this->res->badRequest('No profile fields were provided for update.');
+        }
+
+        $result = $this->authService->updateProfile($userId, $payload);
+        if (!$result['success']) {
+            if (isset($result['errors'])) {
+                return $this->res->validation($result['errors']);
+            }
+
+            return $this->res->badRequest($result['message']);
+        }
+
+        return $this->res->ok([
+            'user' => $result['user'] ?? null,
+        ], $result['message']);
+    }
+
+    /**
      * Get current authenticated user
      * GET /api/auth/me
      */
@@ -274,5 +327,46 @@ class AuthenticationController extends BaseApiController
         }
 
         return $this->authService->getCurrentUser($userId);
+    }
+
+    /**
+     * @return array{path?:string,error?:string}
+     */
+    private function uploadProfileImage(): array
+    {
+        $file = $this->request->getFile('profile_image');
+        if ($file === null) {
+            return [];
+        }
+
+        if ($file->getError() === UPLOAD_ERR_NO_FILE) {
+            return [];
+        }
+
+        $directory = 'users/profile/' . date('Y') . '/' . date('m');
+        $result = $this->uploadService->uploadSingle(
+            $this->request,
+            'profile_image',
+            $directory,
+            ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+            5120
+        );
+
+        if (($result['status'] ?? false) !== true) {
+            $errors = $result['errors'] ?? [];
+            $errorMessage = is_array($errors)
+                ? (string) ($errors['profile_image'] ?? $result['message'] ?? 'Image upload failed.')
+                : (string) ($result['message'] ?? 'Image upload failed.');
+
+            return ['error' => $errorMessage];
+        }
+
+        $uploadData = $result['data'] ?? [];
+        $relativePath = trim((string) ($uploadData['relative_path'] ?? ''));
+        if ($relativePath === '') {
+            return ['error' => 'Image upload failed due to missing file path.'];
+        }
+
+        return ['path' => $relativePath];
     }
 }

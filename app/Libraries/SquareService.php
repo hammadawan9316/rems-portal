@@ -341,7 +341,7 @@ class SquareService
     /**
      * @return array{invoices:array<int, array<string,mixed>>,cursor:?string,count:int}
      */
-    public function listInvoices(int $limit = 20, ?string $cursor = null, ?string $paymentStatus = null): array
+    public function listInvoices(int $limit = 10, ?string $cursor = null, ?string $paymentStatus = null): array
     {
         $safeLimit = max(1, min($limit, 100));
 
@@ -387,6 +387,28 @@ class SquareService
         }
 
         return $this->buildInvoiceResponse($invoice, true);
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    public function getInvoiceSummary(string $invoiceId): array
+    {
+        $normalizedInvoiceId = trim($invoiceId);
+        if ($normalizedInvoiceId === '') {
+            throw new \InvalidArgumentException('Invoice ID is required.');
+        }
+
+        $invoiceResponse = $this->request('GET', '/v2/invoices/' . $normalizedInvoiceId);
+        $invoice = is_array($invoiceResponse['invoice'] ?? null) ? $invoiceResponse['invoice'] : [];
+        if ($invoice === []) {
+            throw new \RuntimeException('Square invoice not found.');
+        }
+
+        return [
+            'invoice' => $invoice,
+            'payment_status' => $this->detectInvoicePaymentStatus($invoice),
+        ];
     }
 
     /**

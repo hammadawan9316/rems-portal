@@ -17,6 +17,7 @@ class UserModel extends Model
         'password_hash',
         'name',
         'phone',
+        'profile_image',
         'company',
         'is_active',
         'email_verified_at',
@@ -36,6 +37,7 @@ class UserModel extends Model
         'password_hash' => 'required|min_length[8]',
         'name' => 'required|min_length[2]|max_length[160]',
         'phone' => 'permit_empty|max_length[20]',
+        'profile_image' => 'permit_empty|max_length[255]',
         'company' => 'permit_empty|max_length[190]',
     ];
 

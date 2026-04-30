@@ -7,6 +7,7 @@ class JwtService
     private string $secretKey;
     private string $algorithm = 'HS256';
     private int $expirationTime = 86400; // 24 hours in seconds
+    private const REVOKED_TOKEN_PREFIX = 'jwt_revoked_';
 
     public function __construct()
     {
@@ -83,6 +84,26 @@ class JwtService
         return $payload;
     }
 
+    public function isTokenRevoked(string $token): bool
+    {
+        $cache = service('cache');
+        return (bool) $cache->get($this->getRevokedTokenCacheKey($token));
+    }
+
+    public function revokeToken(string $token): bool
+    {
+        $payload = $this->verifyAndDecode($token);
+        if (!is_array($payload)) {
+            return false;
+        }
+
+        $expiresAt = (int) ($payload['exp'] ?? 0);
+        $ttl = max(60, $expiresAt - time());
+
+        $cache = service('cache');
+        return (bool) $cache->save($this->getRevokedTokenCacheKey($token), 1, $ttl);
+    }
+
     /**
      * Generate refresh token
      */
@@ -133,5 +154,10 @@ class JwtService
         $decoded = base64_decode(strtr($input, '-_', '+/'), true);
 
         return $decoded !== false ? $decoded : null;
+    }
+
+    private function getRevokedTokenCacheKey(string $token): string
+    {
+        return self::REVOKED_TOKEN_PREFIX . hash('sha256', trim($token));
     }
 }

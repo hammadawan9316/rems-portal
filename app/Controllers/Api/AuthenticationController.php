@@ -233,6 +233,12 @@ class AuthenticationController extends BaseApiController
             return $this->res->unauthorized('Authentication required');
         }
 
+        $authHeader = $this->request->getHeaderLine('Authorization');
+        $token = JwtService::extractToken($authHeader);
+        if ($token !== null) {
+            $this->jwtService->revokeToken($token);
+        }
+
         // Frontend should clear tokens. Optionally, you could blacklist tokens here.
         return $this->res->ok([], 'Logged out successfully');
     }

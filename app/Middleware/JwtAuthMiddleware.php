@@ -33,6 +33,10 @@ class JwtAuthMiddleware implements FilterInterface
             return $this->unauthorizedResponse('Invalid or expired token');
         }
 
+        if ($this->jwtService->isTokenRevoked($token)) {
+            return $this->unauthorizedResponse('Token has been revoked');
+        }
+
         // Store user in request for later use
         $request->user = $payload;
 

@@ -93,6 +93,9 @@ $routes->group('api/', ['namespace' => 'App\Controllers\Api'], function ($routes
             $routes->patch('quotations/(:num)', 'QuotationController::update/$1');
             $routes->post('send_quotation_to_customer/(:num)', 'QuotationController::sendPublicResponseLink/$1');
             $routes->post('create_square_invoice_from_quotation/(:num)', 'QuotationController::createSquareInvoice/$1');
+            $routes->get('square_invoices', 'QuotationController::squareInvoices');
+            $routes->get('square_invoices/(:segment)', 'QuotationController::squareInvoice/$1');
+            $routes->get('quotations/(:num)/square_invoice', 'QuotationController::squareInvoiceByQuotation/$1');
             $routes->get('download_quotations_pdf/(:num)', 'QuotationController::downloadPdf/$1');
             $routes->get('quotations/(:num)', 'QuotationController::show/$1');
             $routes->get('quotation_requests', 'QuotationRequestController::index');

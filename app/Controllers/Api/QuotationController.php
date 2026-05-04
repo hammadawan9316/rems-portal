@@ -517,7 +517,6 @@ class QuotationController extends BaseApiController
         $recipientName = trim((string) ($customer['name'] ?? ''));
         $recipientName = $recipientName !== '' ? $recipientName : 'Customer';
 
-        $emailQueue = service('emailQueue');
         $subject = 'Quotation Response Requested' . ($quoteNumber !== '' ? ' - ' . $quoteNumber : '');
         $expiryHuman = $this->formatDateTimeForEmail($expiresAt);
 
@@ -548,14 +547,7 @@ class QuotationController extends BaseApiController
             'quotationStatus' => $status,
         ]);
 
-        $body = $emailQueue->renderTemplate([
-            'subject' => $subject,
-            'recipientName' => $recipientName,
-            'headline' => 'Review Your Quotation',
-            'contentHtml' => $contentHtml,
-            'actionText' => 'Open Quotation Preview',
-            'actionUrl' => $quotationPreviewUrl,
-        ]);
+        $body = $contentHtml;
 
         $queueId = queue_email_job($customerEmail, $subject, $body, [
             'mail_type' => 'html',
@@ -1627,15 +1619,13 @@ class QuotationController extends BaseApiController
         $rejectUrl = trim((string) ($options['rejectUrl'] ?? ''));
         $publicToken = trim((string) ($options['publicToken'] ?? ''));
 
-        return '<html><head><meta charset="utf-8"><title>Quotation PDF</title><style>body, table, td, div, span, p, a, strong { font-family: Arial, Helvetica, sans-serif !important; }</style></head><body style="margin:0;padding:0;background:#ffffff;">'
-            . $this->buildQuotationDocumentHtml($quotation, $projects, [
-                'showActions' => true,
-                'acceptUrl' => $acceptUrl,
-                'rejectUrl' => $rejectUrl,
-                'contractName' => $contractName,
-                'publicToken' => $publicToken,
-            ])
-            . '</body></html>';
+        return $this->buildQuotationDocumentHtml($quotation, $projects, [
+            'showActions' => true,
+            'acceptUrl' => $acceptUrl,
+            'rejectUrl' => $rejectUrl,
+            'contractName' => $contractName,
+            'publicToken' => $publicToken,
+        ]);
     }
 
     /**
@@ -1653,7 +1643,7 @@ class QuotationController extends BaseApiController
         $quoteDateLabel = $createdAt !== '' ? date('M d, Y', strtotime($createdAt) ?: time()) : date('M d, Y');
 
         $showActions = (bool) ($options['showActions'] ?? false);
-        $quotationStatus = trim((string) ($options['quotationStatus'] ?? ''));
+        $quotationStatus = trim((string) ($options['quotationStatus'] ?? ($quotation['status'] ?? '')));
         $allowedToRespond = $quotationStatus === '' || in_array($quotationStatus, self::CUSTOMER_ALLOWED_RESPONSE_STATUSES, true);
         $showActions = $showActions && $allowedToRespond;
         $acceptUrl = trim((string) ($options['acceptUrl'] ?? ''));
@@ -1662,7 +1652,7 @@ class QuotationController extends BaseApiController
         $publicToken = trim((string) ($options['publicToken'] ?? ''));
         $contractName = trim((string) ($options['contractName'] ?? ''));
 
-        // Only build contract URL if the quotation has an associated contract
+        // Only build contract URL if the quotation has an associated contract.
         $quotationId = (int) ($quotation['id'] ?? 0);
         if ($contractUrl === '' && $publicToken !== '' && $quotationId > 0) {
             $assignment = model(QuotationContractModel::class)->findByQuotationId($quotationId);
@@ -1677,7 +1667,6 @@ class QuotationController extends BaseApiController
         $customerPhone = trim((string) ($customer['phone'] ?? 'N/A'));
         $customerCompany = trim((string) ($customer['company'] ?? 'N/A'));
 
-        $logoDataUri = $this->getLogoDataUri();
         $totals = $this->calculateQuotationTotals($quotation, $projects);
 
         $business = is_array($quotation['business'] ?? null) ? $quotation['business'] : [];
@@ -1692,35 +1681,8 @@ class QuotationController extends BaseApiController
         $businessAddress = trim((string) ($business['address'] ?? ($quotation['business_address'] ?? '4820 Commerce Drive, Suite 310, Dallas, TX 75201')));
         $businessWebsite = trim((string) ($business['website_url'] ?? ($quotation['business_website_url'] ?? 'www.apexestimating.com')));
 
-        $companyTagline = 'Precision Takeoffs - Complete Cost Estimates';
-        $companyAddressLine1 = $businessAddress;
-        $companyAddressLine2 = '';
-        $companyContactParts = [];
-        if ($businessPhone !== '') {
-            $companyContactParts[] = $businessPhone;
-        }
-        if ($businessEmail !== '') {
-            $companyContactParts[] = $businessEmail;
-        }
-        $companyContact = $companyContactParts !== [] ? implode(' - ', $companyContactParts) : '';
-        $companyWebsite = $businessWebsite;
-
-        $companyAddressBlock = esc($companyAddressLine1);
-        if ($companyAddressLine2 !== '') {
-            $companyAddressBlock .= '<br>' . esc($companyAddressLine2);
-        }
-
-        $companyAddressInline = esc($companyAddressLine1);
-        if ($companyAddressLine2 !== '') {
-            $companyAddressInline .= ', ' . esc($companyAddressLine2);
-        }
-
-        $companyAdminHtml = $adminName !== ''
-            ? '<div style="font-size:13px;line-height:1.6;color:#475569;">Admin: ' . esc($adminName) . '</div>'
-            : '';
-
-        $projectsHtml = '';
-        $summaryLines = '';
+        $projectsForTemplate = [];
+        $summaryItems = [];
         $projectIndex = 0;
 
         foreach ($projects as $project) {
@@ -1735,7 +1697,6 @@ class QuotationController extends BaseApiController
             $amount = $this->formatCurrency($lineTotal);
 
             $projectTitle = trim((string) ($project['project_title'] ?? 'Project'));
-            $categoryName = trim((string) ($project['category'] ?? 'General Scope'));
             $projectDescription = trim((string) ($project['project_description'] ?? ''));
             $estimateType = trim((string) ($project['estimate_type'] ?? 'Detailed Estimate'));
             $deadlineDate = trim((string) ($project['deadline_date'] ?? ($project['delivery_date'] ?? ($project['deadline'] ?? ''))));
@@ -1743,272 +1704,127 @@ class QuotationController extends BaseApiController
             $paymentType = strtolower(trim((string) ($project['payment_type'] ?? 'fixed_rate')));
             $hours = $this->toFloat($project['hourly_hours'] ?? 0);
             $rate = $this->toFloat($project['hourly_rate'] ?? ($project['estimated_amount'] ?? 0));
+            $zipCode = trim((string) ($project['zip_code'] ?? ''));
 
             $pricingMeta = 'Fixed price';
             if ($paymentType === 'hourly') {
                 if ($hours > 0) {
-                    $pricingMeta = number_format($hours, 0) . ' hrs x ' . $this->formatCurrency($rate) . '/hr = ' . $amount;
+                    $pricingMeta = number_format($hours, 0) . ' hrs x ' . $this->formatCurrency($rate) . '/hr';
                 } else {
                     $pricingMeta = 'Hourly rate';
                 }
             }
 
-            $serviceBadges = '';
+            $serviceLabels = [];
             foreach ($services as $service) {
                 $serviceText = trim((string) $service);
-                if ($serviceText === '') {
-                    continue;
+                if ($serviceText !== '') {
+                    $serviceLabels[] = $serviceText;
                 }
-
-                // Add a trailing non-breaking space so badge separation survives strict email/PDF renderers.
-                $serviceBadges .= '<span style="display:inline-block;padding:5px 10px;margin:8px 8px 8px 8px !important;border-radius:8px;border:1px solid #f2c6b9;background:#fff4ef;color:#cc5b37;font-size:12px;line-height:1.2;font-weight:600;white-space:nowrap;">' . esc($serviceText) . '</span>&nbsp;';
             }
 
-            if ($serviceBadges === '') {
-                $serviceBadges = '<span style="display:inline-block;padding:5px 10px;border-radius:8px;border:1px solid #d1d5db;background:#f9fafb;color:#6b7280;font-size:12px;line-height:1.2;">No tagged services</span>';
-            }
+            $metaParts = array_filter([$estimateType, $zipCode, $pricingMeta], static fn(string $value): bool => $value !== '');
+            $metaLine = $metaParts !== [] ? implode(' - ', $metaParts) : $estimateType;
 
-            $projectMetaLine = esc($estimateType) . '  -  #' . esc((string) ((int) ($project['id'] ?? $projectIndex))) . '  -  ' . esc($projectDateLabel);
             $projectBlurb = $projectDescription !== ''
-                ? esc($projectDescription)
+                ? $projectDescription
                 : 'Scope details are included in this project estimate package.';
 
-            $projectsHtml .= '
-                <tr style="border:1px solid #707e92 !important;border-radius:8px !important;">
-                <td style="padding:0 0 16px 0;">
+            $projectsForTemplate[] = [
+                'index' => $projectIndex,
+                'title' => $projectTitle,
+                'amount' => $amount,
+                'metaLine' => $metaLine,
+                'dateLabel' => $projectDateLabel,
+                'servicesText' => $serviceLabels !== [] ? implode(' - ', $serviceLabels) : '',
+                'description' => $projectBlurb,
+                'isHighlighted' => $projectIndex % 2 === 1,
+            ];
 
-                    <table width="100%" cellspacing="0">
-                    
-                    <!-- TOP ROW -->
-                    <tr>
-                        <td style="padding:16px;">
-
-                        <table width="100%">
-                            <tr>
-
-                            <!-- INDEX -->
-                            <td width="40" valign="top">
-                                <div style="width:26px;height:26px;border-radius:6px;background:#f1f5f9;text-align:center;line-height:26px;font-size:12px;font-weight:bold;color:#334155;">
-                                ' . $projectIndex . '
-                                </div>
-                            </td>
-
-                            <!-- CONTENT -->
-                            <td valign="top">
-
-                                <div style="font-size:15px;font-weight:700;color:#0f172a;">
-                                ' . esc($projectTitle) . '
-                                </div>
-
-                                <div style="font-size:12px;color:#64748b;line-height:1.4;margin:6px 0 10px 0 !important; padding-bottom:2px;">
-                                ' . $projectMetaLine . '
-                                </div>
-
-                                <div style="margin:0 0 10px 0;line-height:1;">
-                                ' . $serviceBadges . '
-                                </div>
-
-                                <div style="font-size:12px;color:#6b7280; margin-top:6px !important;">
-                                Category: ' . esc($categoryName) . '
-                                </div>
-
-                            </td>
-
-                            <!-- PRICE -->
-                            <td width="140" align="right" valign="top">
-
-                                <div style="font-size:18px;font-weight:700;line-height:1.2;color:#111827;">
-                                ' . esc($amount) . '
-                                </div>
-
-                                <div style="font-size:12px;line-height:1.4;color:#6b7280;margin-top:6px;">
-                                ' . esc($pricingMeta) . '
-                                </div>
-
-                            </td>
-
-                            </tr>
-                        </table>
-
-                        </td>
-                    </tr>
-
-                    <!-- DESCRIPTION ROW -->
-                    <tr>
-                        <td style="padding:12px 18px 16px 18px;border-top:1px solid #f1f5f9;">
-
-                        <div style="font-size:12px;line-height:1.7;color:#475569;">
-                            ' . $projectBlurb . '
-                        </div>
-
-                        </td>
-                    </tr>
-
-                    </table>
-
-                </td>
-                </tr>';
-
-            $summaryLines .= '<tr>'
-                . '<td style="padding:4px 0;color:#516173;font-size:13px;line-height:1.4;">Project ' . $projectIndex . ' - ' . esc($projectTitle) . '</td>'
-                . '<td style="padding:4px 0;text-align:right;color:#334155;font-size:13px;line-height:1.4;">' . esc($amount) . '</td>'
-                . '</tr>';
+            $summaryItems[] = [
+                'label' => 'Project ' . $projectIndex . ' - ' . $projectTitle,
+                'amount' => $amount,
+            ];
         }
 
-        if ($projectsHtml === '') {
-            $projectsHtml = '<tr><td style="padding:20px;text-align:center;font-size:13px;line-height:1.5;color:#6b7280;">No projects found for this quotation.</td></tr>';
-            $summaryLines = '<tr><td style="padding:4px 0;color:#64748b;font-size:13px;line-height:1.4;">No project lines available</td><td style="padding:4px 0;text-align:right;color:#64748b;font-size:13px;line-height:1.4;">' . esc($this->formatCurrency(0.0)) . '</td></tr>';
+        if ($projectsForTemplate === []) {
+            $projectsForTemplate = [[
+                'index' => 1,
+                'title' => 'No projects found',
+                'amount' => $this->formatCurrency(0.0),
+                'metaLine' => '',
+                'dateLabel' => $quoteDateLabel,
+                'servicesText' => '',
+                'description' => 'No projects found for this quotation.',
+                'isHighlighted' => true,
+            ]];
+            $summaryItems = [[
+                'label' => 'No project lines available',
+                'amount' => $this->formatCurrency(0.0),
+            ]];
         }
 
         $discountLabel = 'Discount';
+        $discountSubtitle = '';
         if (($totals['discount_type'] ?? '') === 'percentage') {
-            $discountLabel = 'Discount (Percentage - ' . $this->toFloat($totals['discount_value'] ?? 0) . '%)';
+            $discountLabel = 'Discount (' . $this->toFloat($totals['discount_value'] ?? 0) . '%)';
+            $discountSubtitle = 'Applied to total';
         } elseif (($totals['discount_type'] ?? '') === 'fixed_amount') {
             $discountLabel = 'Discount (Fixed Amount)';
         }
 
-        $actionsHtml = '';
-        if ($showActions && $acceptUrl !== '' && $rejectUrl !== '') {
-            $actionsHtml .= '<div style="margin:0 0 24px 0;padding:16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;">';
-            $actionsHtml .= '<div style="font-size:14px;color:#1e3a8a;font-weight:600;margin-bottom:10px;">Please review and respond using the buttons below.</div>';
-            $actionsHtml .= '<a href="' . esc($acceptUrl) . '" style="display:inline-block;padding:10px 18px;background:#047857;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;margin-right:8px;">Accept Quotation</a>';
-            $actionsHtml .= '<a href="' . esc($rejectUrl) . '" style="display:inline-block;padding:10px 18px;background:#b91c1c;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">Reject Quotation</a>';
-            $actionsHtml .= '</div>';
+        $senderName = $adminName !== '' ? $adminName : $companyName;
+        $footerLine1 = trim($companyName . ' - ' . $businessAddress);
+        $footerParts = [];
+        if ($businessPhone !== '') {
+            $footerParts[] = $businessPhone;
+        }
+        if ($businessEmail !== '') {
+            $footerParts[] = $businessEmail;
+        }
+        if ($businessWebsite !== '') {
+            $footerParts[] = $businessWebsite;
         }
 
-        $contractHtml = '';
-        if ($contractUrl !== '') {
-            $contractTitle = $contractName !== '' ? $contractName : 'Contract';
+        $templateData = [
+            'preheader' => 'Quotation ' . $quoteTitle . ' from ' . $companyName . ' - Please review and respond',
+            'companyName' => $companyName,
+            'companyEmail' => $businessEmail,
+            'companyAddress' => $businessAddress,
+            'companyWebsite' => $businessWebsite,
+            'quoteTitle' => $quoteTitle,
+            'quoteDateLabel' => $quoteDateLabel,
+            'quotationStatusLabel' => strtoupper($quotationStatus !== '' ? $quotationStatus : 'pending'),
+            'customerName' => $customerName,
+            'customerCompany' => $customerCompany,
+            'customerEmail' => $customerEmail,
+            'customerPhone' => $customerPhone,
+            'senderName' => $senderName,
+            'senderEmail' => $businessEmail,
+            'senderPhone' => $businessPhone,
+            'description' => $description !== '' ? $description : 'Complete estimation package prepared for your review.',
+            'projects' => $projectsForTemplate,
+            'summaryItems' => $summaryItems,
+            'subtotal' => $this->formatCurrency($totals['subtotal']),
+            'discountLabel' => $discountLabel,
+            'discountSubtitle' => $discountSubtitle,
+            'discountAmount' => $this->formatCurrency($totals['discount_amount']),
+            'totalAmount' => $this->formatCurrency($totals['total']),
+            'showActions' => $showActions && $acceptUrl !== '' && $rejectUrl !== '',
+            'acceptUrl' => $acceptUrl,
+            'rejectUrl' => $rejectUrl,
+            'showContract' => $contractUrl !== '',
+            'contractUrl' => $contractUrl,
+            'contractTitle' => $contractName !== '' ? $contractName : 'Contract',
+            'contractSubtitle' => $contractName !== '' ? 'Contract document available' : '',
+            'expiryLabel' => $expiryLabel,
+            'footerLine1' => $footerLine1,
+            'footerLine2' => $footerParts !== [] ? implode(' - ', $footerParts) : '',
+            'calendarIconUrl' => '',
+            'contractIconUrl' => '',
+        ];
 
-            $contractHtml .= '<div style="margin:28px 0 0 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;">';
-            $contractHtml .= '<table width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;"><tr><td valign="top">';
-            $contractHtml .= '<div style="font-size:16px;font-weight:700;color:#111827;margin:0 0 6px 0;">' . esc($contractTitle) . '</div>';
-            $contractHtml .= '<div style="font-size:13px;color:#4b5563;margin:0 0 10px 0;">Open contract preview and sign digitally.</div>';
-            $contractHtml .= '</td><td align="right" valign="middle" style="padding-left:16px;white-space:nowrap;">';
-            $contractHtml .= '<a href="' . esc($contractUrl) . '" style="display:inline-block;padding:9px 14px;background:#1f2937;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Open Contract Link</a>';
-            $contractHtml .= '</td></tr></table></div>';
-        }
-
-        $expiryHtml = $expiryLabel !== ''
-            ? '<div style="font-size:12px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin:0 0 14px 0;">Public response link expires on ' . esc($expiryLabel) . '.</div>'
-            : '';
-
-        $headerLogoHtml = '';
-        if ($logoDataUri !== null && $logoDataUri !== '') {
-            $headerLogoHtml = '<div style="margin:16px;line-height:0;" class="logo"><img src="' . esc($logoDataUri) . '" alt="' . esc($companyName) . '" style="display:block;max-width:190px;width:190px;height:auto;"></div>';
-        }
-
-        return '<style type="text/css">.quotation-doc, .quotation-doc * { font-family: Arial, Helvetica, sans-serif !important; } .quotation-doc table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; } ,logo{margin-bottom:16px !important;}</style>
-        
-        <div class="quotation-doc" style="font-family: Arial, Helvetica, sans-serif; background:#ffffff; padding:0; margin:0;">
-
-        <div style="max-width:1000px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
-
-        <!-- HEADER -->
-        <div style="background:#c2022c;padding:22px 24px;">
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
-        <tr>
-        <td valign="top" style="padding:0;">
-        ' . $headerLogoHtml . '
-
-        <div style="font-size:13px;line-height:1.35;opacity:.95;color:#ffffff;margin-top:16px !important;">' . esc($companyTagline) . '</div>
-
-        <div style="margin-top:12px;font-size:12px;line-height:1.45;color:#ffffff;">
-        ' . $companyAddressBlock . '<br>
-        ' . esc($companyContact) . '
-        </div>
-        </td>
-
-        <td align="right" valign="top" style="padding:0 0 0 14px;">
-        <div style="font-size:20px;line-height:1.1;font-weight:700;color:#ffffff;">QUOTATION</div>
-        <div style="font-size:15px;line-height:1.4;margin-top:6px;color:#ffffff;">' . esc($quoteTitle) . '</div>
-        <div style="margin-top:10px;font-size:12px;line-height:1.4;color:#ffffff;">
-        <strong>Date:</strong> ' . esc($quoteDateLabel) . '
-        </div>
-        </td>
-        </tr>
-        </table>
-        </div>
-
-        <!-- BODY -->
-        <div style="padding:22px 24px;">
-
-        ' . $expiryHtml . '
-        ' . $actionsHtml . '
-
-        <!-- BILL TO -->
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;border-collapse:collapse;">
-        <tr>
-        <td width="50%" valign="top" style="padding-right:12px;">
-        <div style="font-size:12px;letter-spacing:0.05em;color:#6b7280;margin-bottom:8px;">BILL TO</div>
-        <div style="font-size:18px;line-height:1.3;font-weight:700;color:#0f172a;">' . esc($customerName) . '</div>
-        <div style="font-size:13px;line-height:1.6;color:#475569;">' . esc($customerCompany) . '</div>
-        <div style="font-size:13px;line-height:1.6;color:#475569;">' . esc($customerEmail) . '</div>
-        <div style="font-size:13px;line-height:1.6;color:#475569;">' . esc($customerPhone) . '</div>
-        </td>
-
-        <td width="50%" valign="top" style="padding-left:12px;">
-        <div style="font-size:12px;letter-spacing:0.05em;color:#6b7280;margin-bottom:8px;">FROM</div>
-        <div style="font-size:16px;line-height:1.3;font-weight:700;color:#0f172a;">' . esc($companyName) . '</div>
-        ' . $companyAdminHtml . '
-        <div style="font-size:13px;line-height:1.6;color:#475569;">' . $companyAddressInline . '</div>
-        <div style="font-size:13px;line-height:1.6;color:#475569;">' . esc($companyWebsite) . '</div>
-        </td>
-        </tr>
-        </table>
-
-        <!-- DESCRIPTION -->
-        <div style="margin-bottom:24px;">
-        <div style="font-size:12px;letter-spacing:0.05em;color:#6b7280;margin-bottom:8px;">DESCRIPTION</div>
-        <div style="font-size:14px;line-height:1.7;color:#0f172a;">
-        ' . esc($description !== '' ? $description : 'Complete estimation package prepared for your review.') . '
-        </div>
-        </div>
-
-        <!-- PROJECTS -->
-        <div style="margin-bottom:24px;">
-        <div style="font-size:12px;letter-spacing:0.05em;color:#6b7280;margin-bottom:12px;">PROJECTS</div>
-
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
-        '
-            . $projectsHtml .
-            '</table>'
-            . '</div>' . 
-            '<div style="margin-top:30px;padding-top:12px;border-top:1px solid #e5e7eb;">' . '<table width="100%" cellspacing="0" cellpadding="0">' 
-            . '<tr>' 
-            . '<td style="vertical-align:top;width:56%;padding-right:18px;">' 
-            . '<div style="font-size:20px;text-transform:uppercase;letter-spacing:0.06em;color:#516173;margin-bottom:10px;line-height:1.1;">Financial Summary</div>' 
-            . '</td>' . 
-            '<td style="vertical-align:top;width:44%;">' . 
-            '<table width="100%" cellspacing="0" cellpadding="0">' . $summaryLines . 
-            '<tr><td colspan="2" style="padding:8px 0;border-top:1px solid #d1d5db;"></td></tr>' . 
-            '<tr>
-            <td style="padding:6px 0;color:#111827;font-size:13px;line-height:1.4;">Subtotal</td>
-            <td style="padding:6px 0;text-align:right;font-weight:700;font-size:13px;line-height:1.4;">' . esc($this->formatCurrency($totals['subtotal'])) . '</td>
-            
-            </tr>' . '<tr><td style="padding:6px 0;color:#059669;font-size:13px;line-height:1.4;">'
-             . esc($discountLabel) . 
-             '</td><td style="padding:6px 0;text-align:right;font-weight:700;color:#059669;font-size:13px;line-height:1.4;">- ' 
-             . esc($this->formatCurrency($totals['discount_amount'])) . '</td></tr>' . 
-             '<tr>
-             <td colspan="2" style="padding:8px 0;border-top:1px solid #d1d5db;">
-             </td>
-             </tr>' . 
-             '<tr>
-             <td style="padding:8px 0;font-size:39px;color:#ffffff;display:none;">.
-             </td>
-             <td>
-             </td>
-             </tr>' 
-             . '<tr>
-             <td style="padding:6px 0;font-size:20px;font-weight:700;color:#111827;line-height:1.2;">Total</td>
-             <td style="padding:0;text-align:right;font-size:34px;font-weight:700;color:#111827;line-height:1.1;">' . esc($this->formatCurrency($totals['total'])) . '</td>
-             </tr>' . 
-             '</table>' . 
-             '</td>' . 
-             '</tr>' . 
-             '</table>' . 
-             '</div>' . $contractHtml . '</div>' . '</div>' . '</div>';
+        return view('emails/quotation-email-template', $templateData);
     }
 
     /**

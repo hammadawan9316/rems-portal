@@ -67,7 +67,6 @@ class SquareService
         array $fileLinks = [],
         ?int $estimatedAmountCents = null
     ): array {
-        $noteLines = ["Project #{$projectId}: {$description}"];
         $pricingSummary = $this->buildPricingSummary($projectData, $estimatedAmountCents);
 
         $details = [
@@ -85,33 +84,31 @@ class SquareService
             'estimated_amount' => $estimatedAmountCents,
         ];
 
-        $noteLines[] = '';
-        $noteLines[] = 'Project Details:';
+        $detailsJson = [];
         foreach ($details as $key => $value) {
             $formatted = $this->formatProjectField($key, $value);
             if ($formatted !== null) {
-                $noteLines[] = '- ' . $formatted;
+                $detailsJson[$key] = $value;
             }
         }
 
-        if ($pricingSummary !== null) {
-            $noteLines[] = '';
-            $noteLines[] = 'Pricing:';
-            $noteLines[] = '- ' . $pricingSummary;
-        }
-
-        if ($fileLinks !== []) {
-            $noteLines[] = '';
-            $noteLines[] = 'File Links:';
-            foreach ($fileLinks as $link) {
-                $candidate = trim((string) $link);
-                if ($candidate !== '') {
-                    $noteLines[] = '- ' . $candidate;
-                }
+        $fileLinkList = [];
+        foreach ($fileLinks as $link) {
+            $candidate = trim((string) $link);
+            if ($candidate !== '') {
+                $fileLinkList[] = $candidate;
             }
         }
 
-        $note = implode("\n", $noteLines);
+        $notePayload = [
+            'project_id' => $projectId,
+            'project_title' => $projectTitle,
+            'project_description' => $description,
+            'details' => $detailsJson,
+            'pricing_summary' => $pricingSummary,
+            'file_links' => $fileLinkList,
+        ];
+        $note = json_encode($notePayload, JSON_UNESCAPED_SLASHES);
         $lineAmount = $this->calculateProjectLineAmount($projectData, $estimatedAmountCents);
 
         $lineItem = [
@@ -209,7 +206,6 @@ class SquareService
             $estimatedAmountCents = isset($project['estimated_amount_cents']) ? (int) $project['estimated_amount_cents'] : null;
             $pricingSummary = $this->buildPricingSummary($projectData, $estimatedAmountCents);
 
-            $noteLines = ["Project #{$projectId}: {$projectDescription}"];
             $details = [
                 'project_title' => $projectTitle,
                 'project_description' => $projectDescription,
@@ -230,36 +226,36 @@ class SquareService
                 'discount_scope' => $projectData['discount_scope'] ?? null,
             ];
 
-            $noteLines[] = '';
-            $noteLines[] = 'Project Details:';
+            $detailsJson = [];
             foreach ($details as $key => $value) {
                 $formatted = $this->formatProjectField($key, $value);
                 if ($formatted !== null) {
-                    $noteLines[] = '- ' . $formatted;
+                    $detailsJson[$key] = $value;
                 }
             }
 
-            if ($pricingSummary !== null) {
-                $noteLines[] = '';
-                $noteLines[] = 'Pricing:';
-                $noteLines[] = '- ' . $pricingSummary;
-            }
-
-            if ($fileLinks !== []) {
-                $noteLines[] = '';
-                $noteLines[] = 'File Links:';
-                foreach ($fileLinks as $link) {
-                    $candidate = trim((string) $link);
-                    if ($candidate !== '') {
-                        $noteLines[] = '- ' . $candidate;
-                    }
+            $fileLinkList = [];
+            foreach ($fileLinks as $link) {
+                $candidate = trim((string) $link);
+                if ($candidate !== '') {
+                    $fileLinkList[] = $candidate;
                 }
             }
+
+            $notePayload = [
+                'project_id' => $projectId,
+                'project_title' => $projectTitle,
+                'project_description' => $projectDescription,
+                'details' => $detailsJson,
+                'pricing_summary' => $pricingSummary,
+                'file_links' => $fileLinkList,
+            ];
+            $note = json_encode($notePayload, JSON_UNESCAPED_SLASHES);
 
             $lineItems[] = [
                 'name' => $projectTitle,
                 'quantity' => '1',
-                'note' => implode("\n", $noteLines),
+                'note' => $note,
                 'base_price_money' => [
                     'amount' => $this->calculateProjectLineAmount($projectData, $estimatedAmountCents),
                     'currency' => $this->config->currency,

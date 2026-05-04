@@ -120,7 +120,7 @@ class InvoiceController extends BaseApiController
         }
 
         try {
-            $detail = $square->getInvoiceSummary($normalizedInvoiceId);
+            $detail = $square->getInvoiceWithAnalysis($normalizedInvoiceId);
             $mapped = $this->mapSquareInvoicesToQuotations([
                 is_array($detail['invoice'] ?? null) ? $detail['invoice'] : ['id' => $normalizedInvoiceId],
             ]);

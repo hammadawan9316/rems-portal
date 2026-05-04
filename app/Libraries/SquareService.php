@@ -133,13 +133,6 @@ class SquareService
             ],
         ];
 
-        $projectDiscount = $this->buildOrderDiscountPayload(
-            $projectData['discount_type'] ?? null,
-            $projectData['discount_value'] ?? null
-        );
-        if ($projectDiscount !== null) {
-            $orderPayload['order']['discounts'] = [$projectDiscount];
-        }
 
         $orderRes = $this->request('POST', '/v2/orders', $orderPayload);
         $orderId = (string) ($orderRes['order']['id'] ?? '');
@@ -229,9 +222,6 @@ class SquareService
                 'estimated_amount' => $estimatedAmountCents,
                 'payment_type' => $projectData['payment_type'] ?? null,
                 'hourly_hours' => $projectData['hourly_hours'] ?? null,
-                'discount_type' => $projectData['discount_type'] ?? null,
-                'discount_value' => $projectData['discount_value'] ?? null,
-                'discount_scope' => $projectData['discount_scope'] ?? null,
             ];
 
             $detailsJson = [];

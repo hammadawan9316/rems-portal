@@ -521,24 +521,24 @@ class SquareService
     private function detectInvoicePaymentStatus(array $invoice): string
     {
         $paymentRequests = is_array($invoice['payment_requests'] ?? null) ? $invoice['payment_requests'] : [];
-        
+
         $totalRequested = 0;
         $totalCompleted = 0;
-        
+
         foreach ($paymentRequests as $request) {
             if (!is_array($request)) {
                 continue;
             }
-            
+
             $totalRequested += $this->moneyAmount($request['computed_amount_money'] ?? null);
             $totalCompleted += $this->moneyAmount($request['total_completed_amount_money'] ?? null);
         }
-        
+
         // If no payment requests, check legacy amount_money fields
         if ($totalRequested === 0) {
             $amount = $this->moneyAmount($invoice['amount_money'] ?? null);
             $paid = $this->moneyAmount($invoice['paid_amount_money'] ?? null);
-            
+
             if ($amount > 0 && $paid >= $amount) {
                 return 'paid';
             }
@@ -849,6 +849,7 @@ class SquareService
 
             return [
                 'name' => 'Discount',
+                'type' => 'FIXED_PERCENTAGE',
                 'scope' => 'ORDER',
                 'percentage' => number_format($percent, 2, '.', ''),
             ];
@@ -861,6 +862,7 @@ class SquareService
 
         return [
             'name' => 'Discount',
+            'type' => 'FIXED_AMOUNT',
             'scope' => 'ORDER',
             'amount_money' => [
                 'amount' => $amountCents,

@@ -4,6 +4,7 @@ namespace App\Controllers\Api;
 
 use App\Libraries\SquareProjectQueueService;
 use App\Libraries\SquareService;
+use App\Models\BusinessProfileModel;
 use App\Models\ProjectModel;
 use App\Models\QuotationModel;
 
@@ -125,6 +126,7 @@ class InvoiceController extends BaseApiController
                 is_array($detail['invoice'] ?? null) ? $detail['invoice'] : ['id' => $normalizedInvoiceId],
             ]);
             $detail['linked_quotation'] = $mapped[$normalizedInvoiceId] ?? null;
+            $detail['business_profile'] = (new BusinessProfileModel())->findActive() ?: null;
 
             return $this->res->ok($detail, 'Square invoice retrieved successfully.');
         } catch (\Throwable $exception) {

@@ -133,6 +133,14 @@ class SquareService
             ],
         ];
 
+        $projectDiscount = $this->buildOrderDiscountPayload(
+            $projectData['discount_type'] ?? null,
+            $projectData['discount_value'] ?? null
+        );
+        if ($projectDiscount !== null) {
+            $orderPayload['order']['discounts'] = [$projectDiscount];
+        }
+
         $orderRes = $this->request('POST', '/v2/orders', $orderPayload);
         $orderId = (string) ($orderRes['order']['id'] ?? '');
         if ($orderId === '') {
@@ -276,6 +284,14 @@ class SquareService
                 'line_items' => $lineItems,
             ],
         ];
+
+        $quotationDiscount = $this->buildOrderDiscountPayload(
+            $quotation['discount_type'] ?? null,
+            $quotation['discount_value'] ?? null
+        );
+        if ($quotationDiscount !== null) {
+            $orderPayload['order']['discounts'] = [$quotationDiscount];
+        }
 
         $orderRes = $this->request('POST', '/v2/orders', $orderPayload);
         $orderId = (string) ($orderRes['order']['id'] ?? '');
@@ -748,7 +764,7 @@ class SquareService
      */
     private function calculateProjectLineAmount(array $projectData, ?int $estimatedAmountCents): int
     {
-        $baseAmount = max(0, (int) ($estimatedAmountCents ?? 0));
+        $baseAmount = $this->normalizeAmountToCents($estimatedAmountCents);
         $paymentType = strtolower(trim((string) ($projectData['payment_type'] ?? 'fixed_rate')));
 
         if ($paymentType !== 'hourly') {
@@ -769,7 +785,7 @@ class SquareService
     private function buildPricingSummary(array $projectData, ?int $estimatedAmountCents): ?string
     {
         $paymentType = strtolower(trim((string) ($projectData['payment_type'] ?? 'fixed_rate')));
-        $baseAmount = max(0, (int) ($estimatedAmountCents ?? 0));
+        $baseAmount = $this->normalizeAmountToCents($estimatedAmountCents);
 
         if ($paymentType === 'hourly') {
             $hours = $this->toFloat($projectData['hourly_hours'] ?? 0);
@@ -788,6 +804,77 @@ class SquareService
     private function formatMoneyAmount(int $amount): string
     {
         return '$' . number_format($amount / 100, 2, '.', ',');
+    }
+
+    /**
+     * @param mixed $value
+     */
+    private function normalizeAmountToCents($value): int
+    {
+        if ($value === null) {
+            return 0;
+        }
+
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            if ($trimmed === '') {
+                return 0;
+            }
+
+            $normalized = preg_replace('/[^0-9.\-]/', '', $trimmed);
+            if ($normalized === '' || $normalized === '-' || $normalized === '.') {
+                return 0;
+            }
+
+            return max(0, (int) round(((float) $normalized) * 100));
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return max(0, (int) round(((float) $value) * 100));
+        }
+
+        return 0;
+    }
+
+    /**
+     * @param mixed $discountValue
+     * @return array<string, mixed>|null
+     */
+    private function buildOrderDiscountPayload(?string $discountType, $discountValue): ?array
+    {
+        $normalizedType = strtolower(trim((string) $discountType));
+        if ($normalizedType === 'fixed') {
+            $normalizedType = 'fixed_amount';
+        }
+
+        if (!in_array($normalizedType, ['fixed_amount', 'percentage'], true)) {
+            return null;
+        }
+
+        if ($normalizedType === 'percentage') {
+            $percent = $this->toFloat($discountValue);
+            if ($percent <= 0) {
+                return null;
+            }
+
+            return [
+                'name' => 'Discount',
+                'percentage' => number_format($percent, 2, '.', ''),
+            ];
+        }
+
+        $amountCents = $this->normalizeAmountToCents($discountValue);
+        if ($amountCents <= 0) {
+            return null;
+        }
+
+        return [
+            'name' => 'Discount',
+            'amount_money' => [
+                'amount' => $amountCents,
+                'currency' => $this->config->currency,
+            ],
+        ];
     }
 
     /**

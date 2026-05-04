@@ -849,6 +849,7 @@ class SquareService
 
             return [
                 'name' => 'Discount',
+                'scope' => 'ORDER',
                 'percentage' => number_format($percent, 2, '.', ''),
             ];
         }
@@ -860,6 +861,7 @@ class SquareService
 
         return [
             'name' => 'Discount',
+            'scope' => 'ORDER',
             'amount_money' => [
                 'amount' => $amountCents,
                 'currency' => $this->config->currency,
